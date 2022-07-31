@@ -37,6 +37,8 @@ jobs:
           sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
           sudo docker run hello-world
 
+          make dev
+
       - name: script
         run: |
           sudo docker run --detach --rm --name openldap -p 1389:1389 --env LDAP_USERS=john --env LDAP_PASSWORDS=abc bitnami/openldap:latest
