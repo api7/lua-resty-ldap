@@ -37,7 +37,7 @@ jobs:
           sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
           sudo docker run hello-world
 
-          apt -y install lua5.1 luarocks
+          sudo apt -y install lua5.1 luarocks
           make dev
 
       - name: script
