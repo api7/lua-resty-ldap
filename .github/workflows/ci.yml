@@ -18,28 +18,28 @@ jobs:
 
       - name: get dependencies
         run: |
-          apt-get -y install --no-install-recommends wget curl gnupg ca-certificates lsb-release
+          sudo apt-get -y install --no-install-recommends wget curl gnupg ca-certificates lsb-release
 
           # openresty
           wget -O - https://openresty.org/package/pubkey.gpg | sudo apt-key add -
           echo "deb http://openresty.org/package/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/openresty.list
-          apt-get update
-          apt-get -y install openresty
+          sudo apt-get update
+          sudo apt-get -y install openresty
 
           # Test::Nginx
-          cpan Test::Nginx
+          sudo cpan Test::Nginx
 
           # docker
-          apt-get remove docker docker-engine docker.io containerd runc
+          sudo apt-get remove docker docker-engine docker.io containerd runc
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          apt-get update
-          apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
-          docker run hello-world
+          sudo apt-get update
+          sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+          sudo docker run hello-world
 
       - name: script
         run: |
-          docker run --detach --rm --name openldap -p 1389:1389 --env LDAP_USERS=john --env LDAP_PASSWORDS=abc bitnami/openldap:latest
+          sudo docker run --detach --rm --name openldap -p 1389:1389 --env LDAP_USERS=john --env LDAP_PASSWORDS=abc bitnami/openldap:latest
           sleep 3
           export PATH=$OPENRESTY_PREFIX/nginx/sbin:$OPENRESTY_PREFIX/luajit/bin:$PATH
           make test
