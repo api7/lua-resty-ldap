@@ -16,12 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - name: Install Lua
-        uses: leafo/gh-actions-lua@v8
-
-      - name: Install Luarocks
-        uses: leafo/gh-actions-luarocks@v4
-
       - name: get dependencies
         run: |
           sudo apt-get -y install --no-install-recommends wget curl gnupg ca-certificates lsb-release
@@ -43,6 +37,7 @@ jobs:
           sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
           sudo docker run hello-world
 
+          apt -y install lua5.1 luarocks
           make dev
 
       - name: script
