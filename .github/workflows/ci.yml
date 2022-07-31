@@ -38,7 +38,7 @@ jobs:
           sudo docker run hello-world
 
           sudo apt -y install lua5.1 luarocks
-          make dev
+          sudo luarocks install lua_pack
 
       - name: script
         run: |
