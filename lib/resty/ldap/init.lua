@@ -7,11 +7,33 @@ local tostring =  tostring
 local fmt = string.format
 local tcp = ngx.socket.tcp
 
+local default_conf = {
+  timeout = 10000,
+  start_tls = false,
+  ldap_host = "localhost",
+  ldap_port = 389,
+  ldaps = false,
+  verify_ldap_host = false,
+  base_dn = "ou=users,dc=example,dc=org",
+  attribute = "cn",
+  keepalive = 60000,
+}
+
+local function set_conf_default_values(conf)
+  for k, v in pairs(default_conf) do
+    if conf[k] == nil then
+      conf[k] = v
+    end
+  end
+end
+
 
 local _M = {}
 
 
 function _M.ldap_authenticate(given_username, given_password, conf)
+  set_conf_default_values(conf)
+
   local is_authenticated
   local err, suppressed_err, ok, _
 
