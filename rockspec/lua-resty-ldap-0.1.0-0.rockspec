@@ -7,7 +7,7 @@ source = {
 
 description = {
    summary = "Nonblocking Lua ldap driver library for OpenResty",
-   homepage = "https://github.com/iresty/lua-resty-ldap",
+   homepage = "https://github.com/api7/lua-resty-ldap",
    license = "Apache License 2.0",
    maintainer = "Yuansheng Wang <membphis@gmail.com>"
 }
