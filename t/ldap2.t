@@ -81,3 +81,72 @@ GET /t
 --- error_log
 Error: The supplied credential is invalid.
 --- error_code: 401
+
+
+
+=== TEST 4: ldaps
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require "resty.ldap.client"
+
+            local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true })
+            local err = client:simple_bind()
+            if err then
+                ngx.log(ngx.ERR, err)
+                ngx.exit(401)
+            end
+        }
+    }
+--- request
+GET /t
+--- no_error_log
+[error]
+--- error_code: 200
+
+
+
+=== TEST 5: starttls
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require "resty.ldap.client"
+
+            local client = ldap_client:new("127.0.0.1", 1389, { start_tls = true })
+            local err = client:simple_bind()
+            if err then
+                ngx.log(ngx.ERR, err)
+                ngx.exit(401)
+            end
+        }
+    }
+--- request
+GET /t
+--- no_error_log
+[error]
+--- error_code: 200
+
+
+
+=== TEST 6: ldaps (verify server certificate)
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require "resty.ldap.client"
+
+            local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true, ssl_verify = true })
+            local err = client:simple_bind()
+            if err then
+                ngx.log(ngx.ERR, err)
+                ngx.exit(401)
+            end
+        }
+    }
+--- request
+GET /t
+--- no_error_log
+[error]
+--- error_code: 200
