@@ -134,6 +134,7 @@ GET /t
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
+        lua_ssl_trusted_certificate ../../certs/mycacert.crt;
         content_by_lua_block {
             local ldap_client = require "resty.ldap.client"
 
