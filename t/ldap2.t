@@ -22,7 +22,7 @@ __DATA__
         content_by_lua_block {
             local ldap_client = require "resty.ldap.client"
 
-            local client = ldap_client:new("127.0.0.1", 1389, {})
+            local client = ldap_client:new("127.0.0.1", 1389)
             local err = client:simple_bind()
             if err then
                 ngx.log(ngx.ERR, err)
@@ -45,8 +45,8 @@ GET /t
         content_by_lua_block {
             local ldap_client = require "resty.ldap.client"
 
-            local client = ldap_client:new("127.0.0.1", 1389, {})
-            local err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
+            local client = ldap_client:new("127.0.0.1", 1389)
+            local err = client:simple_bind("cn=john,ou=users,dc=example,dc=org", "abc")
             if err then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
@@ -68,7 +68,7 @@ GET /t
         content_by_lua_block {
             local ldap_client = require "resty.ldap.client"
 
-            local client = ldap_client:new("127.0.0.1", 1389, {})
+            local client = ldap_client:new("127.0.0.1", 1389)
             local err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "invalid_password")
             if err then
                 ngx.log(ngx.ERR, err)
