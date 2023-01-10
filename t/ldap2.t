@@ -138,7 +138,7 @@ GET /t
         content_by_lua_block {
             local ldap_client = require "resty.ldap.client"
 
-            local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true, ssl_verify = true })
+            local client = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = true })
             local err = client:simple_bind()
             if err then
                 ngx.log(ngx.ERR, err)
