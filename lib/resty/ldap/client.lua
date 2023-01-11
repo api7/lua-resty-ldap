@@ -125,6 +125,10 @@ local function _send_recieve(cli, request)
 end
 
 function _M.new(_, host, port, client_config)
+    if not host or not port then
+        return nil, "host and port cannot be nil"
+    end
+
     local opts = client_config or {}
     local socket_config = {
         socket_timeout = opts.socket_timeout or 10000,
