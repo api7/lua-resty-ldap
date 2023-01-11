@@ -157,21 +157,23 @@ end
 function _M.simple_bind(self, dn, password)
     local res, err = _send_recieve(self, protocol.simple_bind_request(dn, password))
     if not res then
-        return err
+        return false, err
     end
 
     if res.protocol_op ~= protocol.APP_NO.BindResponse then
-        return fmt("Received incorrect Op in packet: %d, expected %d",
+        return false, fmt("Received incorrect Op in packet: %d, expected %d",
             res.protocol_op, protocol.APP_NO.BindResponse)
     end
 
     if res.result_code ~= 0 then
         local error_msg = protocol.ERROR_MSG[res.result_code]
 
-        return fmt("\n  Error: %s\n  Details: %s",
+        return false, fmt("\n  Error: %s\n  Details: %s",
             error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
             res.diagnostic_msg or "")
     end
+
+    return true
 end
 
 return _M

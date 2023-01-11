@@ -95,10 +95,12 @@ To load this module:
 
 #### simple_bind
 
-**syntax:** *err = client:simple_bind(bind_dn?, password?)*
+**syntax:** *res, err = client:simple_bind(bind_dn?, password?)*
 
 `bind_dn` is the full DN you need to bind.
 
 `password` is generally the `userPassword` field stored in that DN, but this is the mechanism implemented by the directory server.
 
 `bind_dn` and `password` can be `nil` values, that means the client is instructed to do anonymous bind.
+
+`res` is a boolean type value that will be true when authentication is successful, when it is false, `err` will contain errors.

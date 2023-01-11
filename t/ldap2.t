@@ -23,8 +23,8 @@ __DATA__
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("127.0.0.1", 1389)
-            local err = client:simple_bind()
-            if err then
+            local res, err = client:simple_bind()
+            if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
             end
@@ -46,8 +46,8 @@ GET /t
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("127.0.0.1", 1389)
-            local err = client:simple_bind("cn=john,ou=users,dc=example,dc=org", "abc")
-            if err then
+            local res, err = client:simple_bind("cn=john,ou=users,dc=example,dc=org", "abc")
+            if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
             end
@@ -69,8 +69,8 @@ GET /t
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("127.0.0.1", 1389)
-            local err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "invalid_password")
-            if err then
+            local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "invalid_password")
+            if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
             end
@@ -92,8 +92,8 @@ Error: The supplied credential is invalid.
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true })
-            local err = client:simple_bind()
-            if err then
+            local res, err = client:simple_bind()
+            if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
             end
@@ -115,8 +115,8 @@ GET /t
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("127.0.0.1", 1389, { start_tls = true })
-            local err = client:simple_bind()
-            if err then
+            local res, err = client:simple_bind()
+            if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
             end
@@ -139,8 +139,8 @@ GET /t
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = true })
-            local err = client:simple_bind()
-            if err then
+            local res, err = client:simple_bind()
+            if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
             end
