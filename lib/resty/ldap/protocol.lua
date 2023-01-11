@@ -1,3 +1,4 @@
+local string_char     = string.char
 local asn1            = require "resty.ldap.asn1"
 local asn1_put_object = asn1.put_object
 local asn1_encode     = asn1.encode
@@ -34,17 +35,19 @@ local function ldap_message(app_no, req)
     return ldapMsg
 end
 
+
 function _M.simple_bind_request(dn, password)
     local ldapAuth = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, password or "")
     if not password then
         -- When password is nil, ASN1_put_object does not generate a zero length for it,
         -- so we need to fill it in manually.
         -- This is a compatibility measure for anonymous bind.
-        ldapAuth = ldapAuth .. string.char(0)
+        ldapAuth = ldapAuth .. string_char(0)
     end
     local bindReq = asn1_encode(3) .. asn1_encode(dn or "") .. ldapAuth
     local ldapMsg = ldap_message(_M.APP_NO.BindRequest, bindReq)
     return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 end
+
 
 return _M
