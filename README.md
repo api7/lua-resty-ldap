@@ -33,7 +33,13 @@ local res, err = ldap.ldap_authenticate("john", "abc", ldapconf)
 
 ```lua
 local ldap_client = require("resty.ldap.client")
-local client = ldap_client:new("127.0.0.1", 1389)
+local client = ldap_client:new("127.0.0.1", 1389, {
+    socket_timeout = 10000,
+    keepalive_timeout = 60000,
+    start_tls = false,
+    ldaps = false,
+    ssl_verify = false
+})
 local err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
 ```
 
