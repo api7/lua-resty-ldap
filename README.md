@@ -1,24 +1,22 @@
-lua-resty-ldap: ldap auth lib
-===========================================
+# lua-resty-ldap: ldap auth lib
 
 Access ldap server to do authentication via cosocket.
 
 This project is extracted from [kong](https://github.com/Kong/kong/tree/master/kong/plugins/ldap-auth).
 
-Installation
-------------
+## Installation
 
 The preferred way to install this library is to use Luarocks:
 
-    luarocks install lua-resty-ldap
+```shell
+luarocks install lua-resty-ldap
 
-Usage
------
+```
 
-### Synopsis
+## Synopsis
 
 ```lua
-local ldap = require "resty.ldap"
+local ldap = require("resty.ldap")
 local ldapconf = {
     timeout = 10000,
     start_tls = false,
@@ -33,16 +31,23 @@ local ldapconf = {
 local res, err = ldap.ldap_authenticate("john", "abc", ldapconf)
 ```
 
-### API
+```lua
+local ldap_client = require("resty.ldap.client")
+local client = ldap_client:new("127.0.0.1", 1389)
+local err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
+```
 
-#### resty.ldap
+## Modules
+
+### resty.ldap
+
 To load this module:
 
-```
-local ldap = require "resty.ldap"
+```lua
+    local ldap = require "resty.ldap"
 ```
 
-#### ldap.ldap_authenticate
+#### ldap_authenticate
 
 **syntax:** *res, err = ldap.ldap_authenticate(username, password, ldapconf)*
 
@@ -59,3 +64,35 @@ local ldap = require "resty.ldap"
 | `attribute`      | string       | "cn"      | Attribute to be used to search the user; e.g., “cn”.       |
 | `timeout`      | number       | 10000      | An optional timeout in milliseconds when waiting for connection with LDAP server.       |
 | `keepalive`      | number       | 60000      | An optional value in milliseconds that defines how long an idle connection to LDAP server will live before being closed.       |
+
+### resty.ldap.client
+
+To load this module:
+
+```lua
+    local ldap_client = require "resty.ldap.client"
+```
+
+#### new
+
+**syntax:** *client = ldap_client:new(host, port, client_config?)*
+
+`client_config` is a table of below items, it is optional:
+
+| key      | type | default value      | Description |
+| ----------- | ----------- | ----------- | ----------- |
+| `socket_timeout`      | number       | 10000      | An optional timeout in milliseconds when waiting for connection with LDAP server.       |
+| `keepalive_timeout`   | number       | 60000      | An optional value in milliseconds that defines how long an idle connection to LDAP server will live before being closed.       |
+| `start_tls`      | boolean       | false      | Set it to `true` to issue StartTLS (Transport Layer Security) extended operation over ldap connection. If the start_tls setting is enabled, ensure the ldaps setting is disabled.       |
+| `ldaps`      | boolean       | false      | Set to `true` to connect using the LDAPS protocol (LDAP over TLS). When ldaps is configured, you must use port 636. If the ldap setting is enabled, ensure the start_tls setting is disabled.       |
+| `ssl_verify`      | boolean       | false      | Set to true to authenticate LDAP server. The server certificate will be verified according to the CA certificates specified by the `lua_ssl_trusted_certificate` directive.       |
+
+#### simple_bind
+
+**syntax:** *err = client:simple_bind(bind_dn?, password?)*
+
+`bind_dn` is the full DN you need to bind.
+
+`password` is generally the `userPassword` field stored in that DN, but this is the mechanism implemented by the directory server.
+
+`bind_dn` and `password` can be `nil` values, that means the client is instructed to do anonymous bind.
