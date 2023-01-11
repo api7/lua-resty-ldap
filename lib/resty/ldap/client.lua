@@ -127,8 +127,8 @@ end
 function _M.new(_, host, port, client_config)
     local opts = client_config or {}
     local socket_config = {
-        socket_timeout = opts.socket_timeout or 3000,
-        keepalive_timeout = opts.keepalive_timeout or (60 * 10 * 1000), -- 10 min
+        socket_timeout = opts.socket_timeout or 10000,
+        keepalive_timeout = opts.keepalive_timeout or (60 * 1000), -- 10 min
         -- keepalive_size = opts.keepalive_size or 2,
         start_tls = opts.start_tls or false,
         ldaps = opts.ldaps or false,
