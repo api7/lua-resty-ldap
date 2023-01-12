@@ -1,5 +1,5 @@
-package = "lua-resty-ldap-main"
-version = "0.1-0"
+package = "lua-resty-ldap"
+version = "main-0"
 source = {
    url = "git://github.com/api7/lua-resty-ldap",
    branch = "main",
@@ -14,6 +14,7 @@ description = {
 
 dependencies = {
    "lua_pack = 2.0.0-0"
+   "lpeg = 1.0.2-1"
 }
 
 build = {

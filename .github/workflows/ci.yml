@@ -38,7 +38,7 @@ jobs:
           sudo docker run hello-world
 
           sudo apt -y install lua5.1 luarocks
-          sudo luarocks install lua_pack
+          sudo luarocks install lua_pack lpeg
 
       - name: script
         run: |
