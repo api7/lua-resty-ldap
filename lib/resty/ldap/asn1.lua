@@ -130,7 +130,7 @@ _M.get_object = asn1_get_object
 
 local function asn1_put_object(tag, class, constructed, data, len)
   len = type(data) == "string" and #data or len or 0
-  if len <= 0 then
+  if len < 0 then
     return nil, "invalid object length"
   end
 
