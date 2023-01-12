@@ -176,4 +176,14 @@ function _M.simple_bind(self, dn, password)
     return true
 end
 
+
+function _M.search(self, base_dn)
+    local res, err = _send_recieve(self, protocol.search_request(base_dn))
+    if not res then
+        return false, err
+    end
+    return res
+end
+
+
 return _M

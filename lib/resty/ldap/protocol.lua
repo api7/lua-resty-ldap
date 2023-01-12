@@ -21,6 +21,9 @@ _M.APP_NO = {
     BindRequest = 0,
     BindResponse = 1,
     UnbindRequest = 2,
+    SearchRequest = 3,
+    SearchResultEntry = 4,
+    SearchResultDone = 5,
     ExtendedRequest = 23,
     ExtendedResponse = 24
 }
@@ -46,6 +49,25 @@ function _M.simple_bind_request(dn, password)
     end
     local bindReq = asn1_encode(3) .. asn1_encode(dn or "") .. ldapAuth
     local ldapMsg = ldap_message(_M.APP_NO.BindRequest, bindReq)
+    return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
+end
+
+
+function _M.search_request(base_obj)
+    local base_object = asn1_encode(base_obj, asn1.TAG.OCTET_STRING)
+    local scope = asn1_encode(2, asn1.TAG.ENUMERATED)
+    local derefAliases = asn1_encode(0, asn1.TAG.ENUMERATED)
+    local sizeLimit = asn1_encode(0, asn1.TAG.INTEGER)
+    local timeLimit = asn1_encode(0, asn1.TAG.INTEGER)
+    local typesOnly = asn1_encode(false, asn1.TAG.BOOLEAN)
+    --local filter = asn1_put_object(7, asn1.CLASS.CONTEXT_SPECIFIC, 0, "objectClass")
+    local filter = asn1_put_object(8, asn1.CLASS.CONTEXT_SPECIFIC, 0, asn1_encode("uid")..asn1_encode("user*"))
+    local attributes = asn1_encode("uid")..asn1_encode("uidNumber")
+    local attributes_seq = asn1_encode(attributes, asn1.TAG.SEQUENCE)
+
+    local searchReq = base_object .. scope .. derefAliases .. sizeLimit ..
+        timeLimit .. typesOnly .. filter .. attributes_seq
+    local ldapMsg = ldap_message(_M.APP_NO.SearchRequest, searchReq)
     return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 end
 
