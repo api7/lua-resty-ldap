@@ -4,6 +4,7 @@ local ffi_new = ffi.new
 local ffi_string = ffi.string
 local ffi_cast = ffi.cast
 local band = bit.band
+local string_char = string.char
 local base = require "resty.core.base"
 local new_tab = base.new_tab
 
@@ -184,6 +185,11 @@ do
     return asn1_put_object(TAG.SEQUENCE, CLASS.UNIVERSAL, 1, val)
   end
 
+  encoder[TAG.BOOLEAN] = function (val)
+    -- tag(BOOLEAN), length(1), value(TRUE: 0xFF, FALSE: 0)
+    return string_char(1, 1, val and 0xff or 0)
+  end
+
   function encode(val, tag)
     if tag == nil then
       local typ = type(val)
@@ -191,6 +197,8 @@ do
         tag = TAG.OCTET_STRING
       elseif typ == "number" then
         tag = TAG.INTEGER
+      elseif typ == "boolean" then
+        tag = TAG.BOOLEAN
       end
     end
 
