@@ -1,11 +1,10 @@
 local lpeg = require('lpeg')
 local P, R, S, V = lpeg.P, lpeg.R, lpeg.S, lpeg.V
 local C, Ct, Cmt, Cg, Cc, Cf, Cmt = lpeg.C, lpeg.Ct, lpeg.Cmt, lpeg.Cg, lpeg.Cc, lpeg.Cf, lpeg.Cmt
-local locale = lpeg.locale()
 
-local next = next
 local string_char = string.char
 local table_insert = table.insert
+local table_concat = table.concat
 
 local _M = {}
 
@@ -40,15 +39,15 @@ local function list(pattern, min)
 end
 
 -- Formatters
-local cOPBody = function (op_type, ...)
+local cOPBody = function(op_type, ...)
     return {
         op_type = op_type,
         items = (...)[1] ~= nil and (...) or {...}
     }
 end
 
-local cItemBody = function (item_type, ...)
-    local args = pack(...)
+local cItemBody = function(item_type, ...)
+    local args = {...}
     return {
         item_type = item_type,
         attribute_description = args[1].attribute_description,
@@ -62,7 +61,7 @@ local rawValue = (P'_' + R('az', 'AZ')) * (P'_' + R '09' + R('az', 'AZ')) ^ 0
 
 -- Grammar
 local filter = P{
-    _'FILTER' / function (f)
+    _'FILTER' / function(f)
         return f
     end,
     FILTER = _'FILL' * P'(' * _'OP' * P')' * _'FILL' / function(f)
@@ -76,11 +75,8 @@ local filter = P{
     OP_OR = (P'|' * _'FILL' * list('FILTER', 1) * _'FILL') / function(...)
         return cOPBody(_M.OP_TYPE_OR, ...)
     end,
-    OP_NOT = 
-        (P'!' * (
-            (_'FILL' * _'FILTER' * _'FILL') +
-            (_'FILL' * _'ITEM' * _'FILL')
-        )) / function(...)
+    OP_NOT =
+        (P'!' * _'FILL' * _'FILTER' * _'FILL') / function(...)
             return cOPBody(_M.OP_TYPE_NOT, ...)
         end,
     ITEM = _'ITEM_SUBSTRING' +  _'ITEM_SIMPLE' + _'ITEM_PRESENT',
@@ -90,7 +86,7 @@ local filter = P{
     ITEM_SIMPLE = _'ATTRIBUTE_DESCRIPTION' * _'FILTER_TYPE' * _'ATTRIBUTE_VALUE' / function(...)
         return cItemBody(_M.ITEM_TYPE_SIMPLE, ...)
     end,
-    ITEM_PRESENT = _'ATTRIBUTE_DESCRIPTION' * P'=*' / function (value)
+    ITEM_PRESENT = _'ATTRIBUTE_DESCRIPTION' * P'=*' / function(value)
         return cItemBody(
             _M.ITEM_TYPE_PRESENT, value,
             { filter_type = _M.FILTER_TYPE_EQUAL },
@@ -121,17 +117,11 @@ local filter = P{
         ((_'ATTRIBUTE_VALUE' * _'WILDCARD') +
         (_'WILDCARD' * _'ATTRIBUTE_VALUE' * _'WILDCARD') +
         (_'WILDCARD' * _'ATTRIBUTE_VALUE')) / function(...)
-            local args = pack(...)
-            local s = ''
-            for i = 1, args.n, 1 do
-                local value = args[i]
-                if type(value) == "table" then
-                    s = s .. value.attribute_value
-                else
-                    s = s .. value
-                end
+            local s = {}
+            for _, value in ipairs({...}) do
+                table_insert(s, type(value) == "table" and value.attribute_value or value)
             end
-            return { attribute_value = s }
+            return { attribute_value = table_concat(s) }
         end,
 
     WILDCARD = P'*' / '*',

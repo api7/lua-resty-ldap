@@ -119,16 +119,6 @@ GET /t
 
             local cases = {
                 {
-                    filter = '(!objectClass=posixAccount)',
-                    test = (function(f, m)
-                        -- {"op_type":"not","items":[{"attribute_value":"posixAccount","item_type":"simple","attribute_description":"objectClass","filter_type":"equal"}]}
-                        assert(f.op_type and f.op_type == 'not', m .. 'op_type != not, ' .. f.op_type)
-                        assert(f.items and next(f.items) ~= nil, m .. 'items not exist or empty, ' .. cjson.encode(f.items))
-                        assert(f.items[1] ~= nil, m .. 'items not a object table')
-                        assert(f.items[1].attribute_value == 'posixAccount', m .. 'items[1].attribute_value != posixAccount, ' .. f.items[1].attribute_value)
-                    end)
-                },
-                {
                     filter = '(!(objectClass=posixAccount))',
                     test = (function(f, m)
                         -- {"op_type":"not","items":[{"attribute_value":"posixAccount","item_type":"simple","attribute_description":"objectClass","filter_type":"equal"}]}
@@ -167,7 +157,7 @@ GET /t
                         (&
                             (objectClass=posixAccount)
                             (uid=*)
-                            (!cn=user01)
+                            (!(cn=user01))
                         )
                     ]],
                     test = (function(f, m)
