@@ -116,8 +116,9 @@ local filter = P{
         (V'WILDCARD' * V'ATTRIBUTE_VALUE' * V'WILDCARD') +
         (V'WILDCARD' * V'ATTRIBUTE_VALUE')) / function(...)
             local s = {}
-            for _, value in ipairs({...}) do
-                table_insert(s, type(value) == "table" and value.attribute_value or value)
+            for i = 1, select('#', ...) do
+                local v = select(i, ...)
+                table_insert(s, type(v) == "table" and v.attribute_value or v)
             end
             return { attribute_value = table_concat(s) }
         end,
