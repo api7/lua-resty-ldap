@@ -27,7 +27,6 @@ __DATA__
                 {
                     filter = '(objectClass=*)',
                     test = (function(f, m)
-                        -- {"item_type":"present","attribute_description":"objectClass","filter_type":"equal","attribute_value":"*"}
                         assert(type(f) == 'table', m .. 'type != table, ' .. type(f))
                         assert(f.item_type == 'present', m .. 'item_type != present, ' .. f.item_type)
                         assert(f.attribute_description == 'objectClass', m .. 'attribute_description != objectClass, ' .. f.attribute_description)
@@ -38,7 +37,6 @@ __DATA__
                 {
                     filter = '(objectClass=posixAccount)',
                     test = (function(f, m)
-                        -- {"attribute_description":"objectClass","item_type":"simple","attribute_value":"posixAccount","filter_type":"equal"}
                         assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
                         assert(f.attribute_value == 'posixAccount', m .. 'attribute_value != posixAccount, ' .. f.attribute_value)
                     end)
@@ -46,31 +44,34 @@ __DATA__
                 {
                     filter = '(objectClass=posix*)',
                     test = (function(f, m)
-                        -- {"item_type":"substring","attribute_value":"posix*","filter_type":"equal","attribute_description":"objectClass"}
                         assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
-                        assert(f.attribute_value == 'posix*', m .. 'attribute_value != posix*, ' .. f.attribute_value)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == 'posix', m .. 'attribute_value[1] != posix, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[2] == '*', m .. 'attribute_value[2] != *, ' .. f.attribute_value[2])
                     end)
                 },
                 {
                     filter = '(objectClass=*posix*)',
                     test = (function(f, m)
-                        -- {"item_type":"substring","attribute_value":"*posix*","filter_type":"equal","attribute_description":"objectClass"}
                         assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
-                        assert(f.attribute_value == '*posix*', m .. 'attribute_value != *posix*, ' .. f.attribute_value)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == '*', m .. 'attribute_value[1] != *, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[2] == 'posix', m .. 'attribute_value[2] != posix, ' .. f.attribute_value[2])
+                        assert(f.attribute_value[3] == '*', m .. 'attribute_value[3] != *, ' .. f.attribute_value[3])
                     end)
                 },
                 {
                     filter = '(objectClass=*posix)',
                     test = (function(f, m)
-                        -- {"item_type":"substring","attribute_value":"*posix","filter_type":"equal","attribute_description":"objectClass"}
                         assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
-                        assert(f.attribute_value == '*posix', m .. 'attribute_value != *posix, ' .. f.attribute_value)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == '*', m .. 'attribute_value[1] != *, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[2] == 'posix', m .. 'attribute_value[2] != posix, ' .. f.attribute_value[2])
                     end)
                 },
                 {
                     filter = '(objectClass~=posix)',
                     test = (function(f, m)
-                        -- {"filter_type":"approx","attribute_description":"objectClass","item_type":"simple","attribute_value":"posix"}
                         assert(f.filter_type == 'approx', m .. 'filter_type != substring, ' .. f.filter_type)
                         assert(f.attribute_value == 'posix', m .. 'attribute_value != posix, ' .. f.attribute_value)
                     end)
@@ -78,14 +79,12 @@ __DATA__
                 {
                     filter = '(test>=posix)',
                     test = (function(f, m)
-                        -- {"attribute_value":"posix","filter_type":"greater","attribute_description":"test","item_type":"simple"}
                         assert(f.filter_type == 'greater', m .. 'filter_type != greater, ' .. f.filter_type)
                     end)
                 },
                 {
                     filter = '(test<=posix)',
                     test = (function(f, m)
-                        -- {"attribute_value":"posix","filter_type":"less","attribute_description":"test","item_type":"simple"}
                         assert(f.filter_type == 'less', m .. 'filter_type != less, ' .. f.filter_type)
                     end)
                 },
@@ -169,6 +168,121 @@ GET /t
                         assert(f.items[3].op_type and f.items[3].op_type == 'not', m .. 'items[3].op_type != not, ' .. f.items[3].op_type)
                     end)
                 }
+            }
+
+            for i, case in ipairs(cases) do
+                local result, err = filter.compile(case.filter)
+                if not result then
+                    assert(false, 'case#' .. i .. ' compile error: ' .. err)
+                end
+                ngx.log(ngx.WARN, cjson.encode(result))
+                case.test(result, 'case#' .. i .. ' error: ')
+            end
+        }
+    }
+--- request
+GET /t
+--- no_error_log
+[error]
+--- error_code: 200
+
+
+
+=== TEST 3: substring
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local cjson = require("cjson")
+            local filter = require("resty.ldap.filter")
+
+            local cases = {
+                {
+                    filter = '(objectClass=abcabc*)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == 'abcabc', m .. 'attribute_value[1] != abcabc, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[2] == '*', m .. 'attribute_value[2] != *, ' .. f.attribute_value[2])
+                    end),
+                },
+                {
+                    filter = '(objectClass=*abcabc)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == '*', m .. 'attribute_value[1] != *, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[2] == 'abcabc', m .. 'attribute_value[2] != abcabc, ' .. f.attribute_value[2])
+                    end),
+                },
+                {
+                    filter = '(objectClass=*abcabc*)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == '*', m .. 'attribute_value[1] != *, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[2] == 'abcabc', m .. 'attribute_value[2] != abcabc, ' .. f.attribute_value[2])
+                        assert(f.attribute_value[3] == '*', m .. 'attribute_value[3] != *, ' .. f.attribute_value[3])
+                    end),
+                },
+                {
+                    filter = '(objectClass=abcabc1*abcabc2)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == 'abcabc1', m .. 'attribute_value[1] != abcabc1, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[2] == '*', m .. 'attribute_value[2] != *, ' .. f.attribute_value[2])
+                        assert(f.attribute_value[3] == 'abcabc2', m .. 'attribute_value[3] != abcabc2, ' .. f.attribute_value[3])
+                    end),
+                },
+                {
+                    filter = '(objectClass=*abcabc1*abcabc2)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == '*', m .. 'attribute_value[1] != *, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[4] == 'abcabc2', m .. 'attribute_value[4] != abcabc2, ' .. f.attribute_value[4])
+                    end),
+                },
+                {
+                    filter = '(objectClass=*abcabc1*abcabc2*)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == '*', m .. 'attribute_value[1] != *, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[4] == 'abcabc2', m .. 'attribute_value[4] != abcabc2, ' .. f.attribute_value[4])
+                        assert(f.attribute_value[5] == '*', m .. 'attribute_value[5] != *, ' .. f.attribute_value[5])
+                    end),
+                },
+                {
+                    filter = '(objectClass=abcabc1*abcabc2*abcabc3*abcabc4)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == 'abcabc1', m .. 'attribute_value[1] != abcabc1, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[4] == '*', m .. 'attribute_value[4] != *, ' .. f.attribute_value[4])
+                        assert(f.attribute_value[5] == 'abcabc3', m .. 'attribute_value[5] != abcabc3, ' .. f.attribute_value[5])
+                    end),
+                },
+                {
+                    filter = '(objectClass=*abcabc1*abcabc2*abcabc3*abcabc4*)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'table', m .. 'attribute_value not a table, ' .. type(f.attribute_value))
+                        assert(f.attribute_value[1] == '*', m .. 'attribute_value[1] != *, ' .. f.attribute_value[1])
+                        assert(f.attribute_value[4] == 'abcabc2', m .. 'attribute_value[4] != abcabc2, ' .. f.attribute_value[4])
+                        assert(f.attribute_value[6] == 'abcabc3', m .. 'attribute_value[6] != abcabc3, ' .. f.attribute_value[6])
+                        assert(f.attribute_value[9] == '*', m .. 'attribute_value[9] != *, ' .. f.attribute_value[9])
+                    end),
+                },
+                {
+                    filter = '(objectClass=*)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'present', m .. 'item_type != present, ' .. f.item_type)
+                        assert(type(f.attribute_value) == 'string', m .. 'attribute_value not a string, ' .. type(f.attribute_value))
+                        assert(f.attribute_value == '*', m .. 'attribute_value != *, ' .. f.attribute_value)
+                    end),
+                },
             }
 
             for i, case in ipairs(cases) do

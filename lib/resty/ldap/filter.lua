@@ -44,13 +44,24 @@ local cOPBody = function(op_type, ...)
     }
 end
 
-local cItemBody = function(item_type, ...)
+local cItemBody = function(item_type_hint, ...)
     local args = {...}
+    local attribute_value = args[3].attribute_value
+
+    if not item_type_hint then
+        if #attribute_value == 1 and attribute_value[1] == "*" then
+            item_type_hint = _M.ITEM_TYPE_PRESENT
+            attribute_value = attribute_value[1]
+        else
+            item_type_hint = _M.ITEM_TYPE_SUBSTRING
+        end
+    end
+
     return {
-        item_type = item_type,
+        item_type = item_type_hint,
         attribute_description = args[1].attribute_description,
         filter_type = args[2].filter_type,
-        attribute_value = args[3].attribute_value,
+        attribute_value = attribute_value,
     }
 end
 
@@ -77,19 +88,12 @@ local filter = P{
         (P'!' * V'FILL' * V'FILTER' * V'FILL') / function(...)
             return cOPBody(_M.OP_TYPE_NOT, ...)
         end,
-    ITEM = V'ITEM_SUBSTRING' +  V'ITEM_SIMPLE' + V'ITEM_PRESENT',
-    ITEM_SUBSTRING = (V'ATTRIBUTE_DESCRIPTION' * V'FILTER_TYPE_EQUAL' * V'ATTRIBUTE_VALUE_SUBSTRING') / function(...)
-        return cItemBody(_M.ITEM_TYPE_SUBSTRING, ...)
+    ITEM = V'ITEM_PRESENT_AND_SUBSTRING' +  V'ITEM_SIMPLE',
+    ITEM_PRESENT_AND_SUBSTRING = (V'ATTRIBUTE_DESCRIPTION' * V'FILTER_TYPE_EQUAL' * V'ATTRIBUTE_VALUE_SUBSTRING') / function(...)
+        return cItemBody(nil, ...)
     end,
     ITEM_SIMPLE = V'ATTRIBUTE_DESCRIPTION' * V'FILTER_TYPE' * V'ATTRIBUTE_VALUE' / function(...)
         return cItemBody(_M.ITEM_TYPE_SIMPLE, ...)
-    end,
-    ITEM_PRESENT = V'ATTRIBUTE_DESCRIPTION' * P'=*' / function(value)
-        return cItemBody(
-            _M.ITEM_TYPE_PRESENT, value,
-            { filter_type = _M.FILTER_TYPE_EQUAL },
-            { attribute_value = "*" }
-        )
     end,
     FILTER_TYPE = V'FILTER_TYPE_EQUAL' + V'FILTER_TYPE_APPROX' + V'FILTER_TYPE_GREATER' + V'FILTER_TYPE_LESS',
     FILTER_TYPE_EQUAL = P'=' / function()
@@ -111,19 +115,32 @@ local filter = P{
     ATTRIBUTE_VALUE = rawValue / function(value)
         return { attribute_value = value }
     end,
-    ATTRIBUTE_VALUE_SUBSTRING =
-        ((V'ATTRIBUTE_VALUE' * V'WILDCARD') +
-        (V'WILDCARD' * V'ATTRIBUTE_VALUE' * V'WILDCARD') +
-        (V'WILDCARD' * V'ATTRIBUTE_VALUE')) / function(...)
-            local s = {}
-            for i = 1, select('#', ...) do
-                local v = select(i, ...)
-                table_insert(s, type(v) == "table" and v.attribute_value or v)
+    ATTRIBUTE_VALUE_SUBSTRING = (
+        maybe('ATTRIBUTE_VALUE') *
+        V'WILDCARD' *
+        list(V'ATTRIBUTE_VALUE' * V'WILDCARD', 0) *
+        maybe('ATTRIBUTE_VALUE')
+    ) / function(...)
+        local s = {}
+        for i = 1, select('#', ...) do
+            local v = select(i, ...)
+            if v.attribute_value then
+                table_insert(s, v.attribute_value)
+            elseif #v > 0 and v[1] then -- check if the elements are arrays
+                -- When there is the following format xxx*a*b*c*xxx,
+                -- the parser will output a*b*c* as a nested two-dimensional array,
+                -- which we need to flatten
+                for _, any_item in ipairs(v) do
+                    table_insert(s, any_item.attribute_value)
+                end
             end
-            return { attribute_value = table_concat(s) }
-        end,
+        end
+        return { attribute_value = s }
+    end,
 
-    WILDCARD = P'*' / '*',
+    WILDCARD = P'*' / function()
+        return { attribute_value = "*" }
+    end,
     FILL = list(V'SPACE' + V'TAB' + V'SEP', 0) / function() end,
     SPACE = P(string_char(0x20)),         -- ASCII control charactor - Space
     TAB = P(string_char(0x09)),           -- ASCII control charactor - TAB
