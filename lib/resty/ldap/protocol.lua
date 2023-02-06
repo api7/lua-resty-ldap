@@ -1,5 +1,7 @@
 local string_char     = string.char
-local asn1            = require "resty.ldap.asn1"
+local string_sub      = string.sub
+local asn1            = require("resty.ldap.asn1")
+local filter_compiler = require("resty.ldap.filter")
 local asn1_put_object = asn1.put_object
 local asn1_encode     = asn1.encode
 
@@ -53,20 +55,110 @@ function _M.simple_bind_request(dn, password)
 end
 
 
-function _M.search_request(base_obj)
-    local base_object = asn1_encode(base_obj, asn1.TAG.OCTET_STRING)
-    local scope = asn1_encode(2, asn1.TAG.ENUMERATED)
-    local derefAliases = asn1_encode(0, asn1.TAG.ENUMERATED)
-    local sizeLimit = asn1_encode(0, asn1.TAG.INTEGER)
-    local timeLimit = asn1_encode(0, asn1.TAG.INTEGER)
-    local typesOnly = asn1_encode(false, asn1.TAG.BOOLEAN)
-    --local filter = asn1_put_object(7, asn1.CLASS.CONTEXT_SPECIFIC, 0, "objectClass")
-    local filter = asn1_put_object(8, asn1.CLASS.CONTEXT_SPECIFIC, 0, asn1_encode("uid")..asn1_encode("user*"))
-    local attributes = asn1_encode("uid")..asn1_encode("uidNumber")
-    local attributes_seq = asn1_encode(attributes, asn1.TAG.SEQUENCE)
+_M.SEARCH_SCOPE_BASE_OBJECT = 0
+_M.SEARCH_SCOPE_SINGLE_LEVEL = 1
+_M.SEARCH_SCOPE_WHOLE_SUBTREE = 2
+_M.SEARCH_DEREF_ALIASES_NEVER = 0
+_M.SEARCH_DEREF_ALIASES_IN_SEARCHING = 1
+_M.SEARCH_DEREF_ALIASES_FINDING_BASE_OBJ = 2
+_M.SEARCH_DEREF_ALIASES_ALWAYS = 3
 
-    local searchReq = base_object .. scope .. derefAliases .. sizeLimit ..
-        timeLimit .. typesOnly .. filter .. attributes_seq
+-- protocol reference: https://ldap.com/ldapv3-wire-protocol-reference-search/
+local function build_asn1_filter(filter)
+    local item_type = filter.item_type
+    local filter_type = filter.filter_type
+    local attribute_description = filter.attribute_description
+    local attribute_value = filter.attribute_value
+
+    if item_type == filter_compiler.ITEM_TYPE_SIMPLE then
+        local body = asn1_encode(attribute_description) .. asn1_encode(attribute_value)
+        if filter_type == filter_compiler.FILTER_TYPE_EQUAL then
+            return asn1_put_object(3, asn1.CLASS.CONTEXT_SPECIFIC, 1, body)
+        elseif filter_type == filter_compiler.FILTER_TYPE_APPROX then
+            return asn1_put_object(8, asn1.CLASS.CONTEXT_SPECIFIC, 1, body)
+        elseif filter_type == filter_compiler.FILTER_TYPE_GREATER then
+            return asn1_put_object(5, asn1.CLASS.CONTEXT_SPECIFIC, 1, body)
+        elseif filter_type == filter_compiler.FILTER_TYPE_LESS then
+            return asn1_put_object(6, asn1.CLASS.CONTEXT_SPECIFIC, 1, body)
+        end
+    elseif item_type == filter_compiler.ITEM_TYPE_PRESENT then
+        return asn1_put_object(7, asn1.CLASS.CONTEXT_SPECIFIC, 1, attribute_description)
+    elseif item_type == filter_compiler.ITEM_TYPE_SUBSTRING then
+        local body = ""
+        local attribute_value_len = #attribute_value
+
+        for index, value in ipairs(attribute_value) do
+            if index == 1 and value ~= "*" then
+                -- This means that the values do not start with *,
+                -- so we need to use the initial field in the substring filter.
+                body = body .. asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0,
+                                               asn1_encode(value, asn1.TAG.OCTET_STRING))
+            elseif index == attribute_value_len and value ~= "*" then
+                -- This means that the values do not start with *,
+                -- so we need to use the final field in the substring filter.
+                body = body .. asn1_put_object(2, asn1.CLASS.CONTEXT_SPECIFIC, 0,
+                                               asn1_encode(value, asn1.TAG.OCTET_STRING))
+            else
+                body = body .. asn1_put_object(1, asn1.CLASS.CONTEXT_SPECIFIC, 0,
+                                               asn1_encode(value, asn1.TAG.OCTET_STRING))
+            end
+        end
+        return asn1_put_object(4, asn1.CLASS.CONTEXT_SPECIFIC, 1,
+                   asn1_encode(attribute_description) ..
+                   asn1_encode(body, asn1.TAG.SEQUENCE)
+               )
+    end
+
+    return ""
+end
+
+local function build_asn1_filters(filter_tbl)
+    -- The final-level filter object, which expresses an actual
+    -- expression rather than a set of logical relations.
+    if not filter_tbl.op_type and filter_tbl.item_type then
+        -- Since this function is used for recursive calls,
+        -- it returns directly when the endmost node of the filter tree is encountered.
+        return build_asn1_filter(filter_tbl)
+    end
+
+    if filter_tbl.op_type and filter_tbl.items and #filter_tbl.items > 1 then
+        local sub_filter = ''
+        for _, item in ipairs(filter_tbl.items) do
+            sub_filter = sub_filter .. build_asn1_filters(item)
+        end
+        return asn1_encode(sub_filter, asn1.TAG.SET)
+    end
+
+    -- Provide a default filter, i.e. (objectClass=*)
+    return asn1_put_object(3, asn1.CLASS.CONTEXT_SPECIFIC, 1,
+               asn1_encode("objectClass") ..
+               asn1_encode("*")
+           )
+end
+
+function _M.search_request(base_obj, scope, deref_aliases, size_limit, time_limit,
+                           types_only, filter, attributes)
+    local base_obj = asn1_encode(base_obj, asn1.TAG.OCTET_STRING)
+    local scope = asn1_encode(scope, asn1.TAG.ENUMERATED)
+    local deref_aliases = asn1_encode(deref_aliases, asn1.TAG.ENUMERATED)
+    local size_limit = asn1_encode(size_limit, asn1.TAG.INTEGER)
+    local time_limit = asn1_encode(time_limit, asn1.TAG.INTEGER)
+    local types_only = asn1_encode(types_only, asn1.TAG.BOOLEAN)
+
+    -- compile filter
+    --local filter = asn1_put_object(7, asn1.CLASS.CONTEXT_SPECIFIC, 0, "objectClass")
+    local filter_tbl = filter_compiler.compile(filter)
+    local filter = build_asn1_filters(filter_tbl)
+
+    -- encode attributes to sequence
+    local attributes_encoded = ""
+    for _, attribute in ipairs(attributes) do
+        attributes_encoded = attributes_encoded .. asn1_encode(tostring(attribute))
+    end
+    local attributes_seq = asn1_encode(attributes_encoded, asn1.TAG.SEQUENCE)
+
+    local searchReq = base_obj .. scope .. deref_aliases .. size_limit ..
+        time_limit .. types_only .. filter .. attributes_seq
     local ldapMsg = ldap_message(_M.APP_NO.SearchRequest, searchReq)
     return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 end

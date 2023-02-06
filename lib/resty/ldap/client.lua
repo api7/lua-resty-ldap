@@ -3,11 +3,13 @@ local ldap     = require "resty.ldap.ldap"
 local protocol = require "resty.ldap.protocol"
 local asn1     = require "resty.ldap.asn1"
 
-local tostring = tostring
-local fmt      = string.format
-local log      = ngx.log
-local ERR      = ngx.ERR
-local tcp      = ngx.socket.tcp
+local tostring     = tostring
+local fmt          = string.format
+local log          = ngx.log
+local ERR          = ngx.ERR
+local DEBUG        = ngx.DEBUG
+local tcp          = ngx.socket.tcp
+local table_insert = table.insert
 
 local asn1_parse_ldap_result = asn1.parse_ldap_result
 
@@ -15,6 +17,15 @@ local asn1_parse_ldap_result = asn1.parse_ldap_result
 local _M = {}
 local mt = { __index = _M }
 
+
+local function print_hex(data)
+    local str = ""
+    for i = 1, #data do
+        local char = string.sub(data, i, i)
+        str = str .. string.format("%02x", string.byte(char)) .. " "
+    end
+    log(DEBUG, str)
+end
 
 local function calculate_payload_length(encStr, pos, socket)
     local elen
@@ -104,24 +115,54 @@ local function _send_recieve(cli, request)
     end
 
     local socket = cli.socket
-    local len, err = socket:receive(2)
-    if not len then
-        if err == "timeout" then
-            socket:close()
-            return nil, err
+
+    -- Each response in a multi-response body has ASCII NULL(0x00) as its ending,
+    -- so here the reader is created using receiveuntil.
+    local reader = socket:receiveuntil(string.char(0x00))
+
+    local result = {}
+    -- When the client sends a search request, the server will return several
+    -- different entries in a string-like concatenation, sto we must use a
+    -- loop to complete the bulk extraction of the data.
+    -- This does not affect the response of a single "response body".
+    while true do
+        -- Takes the packet header of a single request body, which has a length
+        -- of two bytes, where the second byte is the length of this response
+        -- body packet.
+        local len, err = reader(2)
+        if not len then
+            if err == "timeout" then -- error on read timeout is nil
+                socket:close()
+                return nil, err
+            end
+            break -- read done, data has been taken to the end
         end
-        return nil, err
+        local _, packet_len = calculate_payload_length(len, 2, socket)
+
+        -- Get the data of the specified length
+        local packet = socket:receive(packet_len)
+        local res, err = asn1_parse_ldap_result(packet)
+        if err then
+            return nil, "Invalid LDAP message encoding: " .. err
+        end
+        table_insert(result, res)
+
+        -- This is an ugly patch to actively stop continuous reading. When a search
+        -- request ends, the last result will be SearchResultDone, at which point
+        -- the continuous reading stops.
+        -- The deeper reason is that the LDAP protocol does not provide a global
+        -- field that specifies the total length of this protocol packet, it is
+        -- just a straight stack of LDAP messages. Therefore the parser implementor
+        -- does not know exactly how many bytes of data should be fetched, and has
+        -- to read in greedy mode.
+        -- The socket read timeout will be used as a fallback when an exception is
+        -- encountered and this does not end the loop.
+        if res and res.protocol_op == protocol.APP_NO.SearchResultDone then
+            break
+        end
     end
 
-    local _, packet_len = calculate_payload_length(len, 2, socket)
-    local packet = socket:receive(packet_len)
-
-    local res, err = asn1_parse_ldap_result(packet)
-    if err then
-        return nil, "Invalid LDAP message encoding: " .. err
-    end
-
-    return res
+    return #result == 1 and result[1] or result
 end
 
 function _M.new(_, host, port, client_config)
@@ -177,11 +218,30 @@ function _M.simple_bind(self, dn, password)
 end
 
 
-function _M.search(self, base_dn)
-    local res, err = _send_recieve(self, protocol.search_request(base_dn))
+function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
+                   types_only, filter, attributes)
+    local res, err = _send_recieve(self, protocol.search_request(
+        base_dn       or 'dc=example,dc=org',
+        scope         or protocol.SEARCH_SCOPE_WHOLE_SUBTREE,
+        deref_aliases or protocol.SEARCH_DEREF_ALIASES_ALWAYS,
+        size_limit    or 0, -- size limit
+        time_limit    or 0, -- time limit
+        types_only    or false, -- type only
+        filter        or "(objectClass=posixAccount)", -- filter
+        attributes    or {"objectClass"} -- attr
+    ))
     if not res then
         return false, err
     end
+
+    for index, item in ipairs(res) do
+        if item.protocol_op == protocol.APP_NO.SearchResultDone then
+            res[index] = nil
+        else
+            res[index] = item.search_entries
+        end
+    end
+
     return res
 end
 
