@@ -46,7 +46,7 @@ GET /t
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("127.0.0.1", 1389)
-            local res, err = client:simple_bind("cn=john,ou=users,dc=example,dc=org", "abc")
+            local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)

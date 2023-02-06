@@ -31,7 +31,7 @@ __DATA__
                 attribute = "cn",
                 keepalive = 60000,
             }
-            local res, err = ldap.ldap_authenticate("john", "abc", ldapconf)
+            local res, err = ldap.ldap_authenticate("user01", "password1", ldapconf)
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
@@ -63,7 +63,7 @@ GET /t
                 attribute = "cn",
                 keepalive = 60000,
             }
-            local res, err = ldap.ldap_authenticate("john", "abc", ldapconf)
+            local res, err = ldap.ldap_authenticate("user02", "password2", ldapconf)
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
@@ -95,7 +95,7 @@ GET /t
                 attribute = "cn",
                 keepalive = 60000,
             }
-            local res, err = ldap.ldap_authenticate("john", "abc", ldapconf)
+            local res, err = ldap.ldap_authenticate("user01", "password1", ldapconf)
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
@@ -128,7 +128,7 @@ GET /t
                 attribute = "cn",
                 keepalive = 60000,
             }
-            local res, err = ldap.ldap_authenticate("john", "abc", ldapconf)
+            local res, err = ldap.ldap_authenticate("user02", "password2", ldapconf)
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
