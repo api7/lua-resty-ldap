@@ -104,3 +104,23 @@ To load this module:
 `bind_dn` and `password` can be `nil` values, that means the client is instructed to do anonymous bind.
 
 `res` is a boolean type value that will be true when authentication is successful, when it is false, `err` will contain errors.
+
+#### search
+
+**syntax:** *res, err = client:search(base_dn?, scope?, deref_aliases?, size_limit?, time_limit?, types_only?, filter?, attributes?)*
+
+`base_dn` is the base DN you need to search. Default is `dc=example,dc=org`.
+
+`scope` is a flag field in the search protocol that specifies how the LDAP server performs the search, such as baseDN only, all subtrees, etc. You can import those values from protocol.lua, `SEARCH_SCOPE_BASE_OBJECT`, `SEARCH_SCOPE_SINGLE_LEVEL` and `SEARCH_SCOPE_WHOLE_SUBTREE`. Default is `SEARCH_SCOPE_WHOLE_SUBTREE`.
+
+`deref_aliases` is a flag field for setting dereferences, to specifies how the server should treat alias entries that it may encounter during processing. You can import those values from protocol.lua, `SEARCH_DEREF_ALIASES_NEVER`, `SEARCH_DEREF_ALIASES_IN_SEARCHING`, `SEARCH_DEREF_ALIASES_FINDING_BASE_OBJ` amd `SEARCH_DEREF_ALIASES_ALWAYS`. Default is `SEARCH_DEREF_ALIASES_ALWAYS`.
+
+`size_limit` is the maximum number of search request response elements. It is an integer, and its value must be greater than or equal to zero, a value of zero indicates that no size limit is requested. Default is `0`.
+
+`time_limit` is used to specifies the maximum length of time, in seconds, that the server should spend processing the request. It is an integer, and its value must be greater than or equal to zero. A value of zero indicates that no time limit is requested. Default is `0`.
+
+`types_only` indicates whether search result entries should only include attribute descriptions (attribute type names or OIDs, followed by zero or more attribute options), rather than both attribute descriptions and values. This is a Boolean element. Default is `false`.
+
+`filter` is an LDAP filter expression in string. Default is `(objectClass=posixAccount)`.
+
+`attributes` is an array table that contains one to more query fields that you need to have the LDAP server return. Default is `["objectClass"]`.
