@@ -92,7 +92,7 @@ Error: The supplied credential is invalid.
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true })
-            local res, err = client:simple_bind()
+            local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
@@ -115,7 +115,7 @@ GET /t
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("127.0.0.1", 1389, { start_tls = true })
-            local res, err = client:simple_bind()
+            local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
@@ -139,7 +139,7 @@ GET /t
             local ldap_client = require "resty.ldap.client"
 
             local client = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = true })
-            local res, err = client:simple_bind()
+            local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
