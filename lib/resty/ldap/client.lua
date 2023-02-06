@@ -108,7 +108,7 @@ local function _send(cli, request)
     end
 end
 
-local function _send_recieve(cli, request)
+local function _send_recieve(cli, request, multi_resp_hint)
     local err = _send(cli, request)
     if err then
         return nil, err
@@ -157,7 +157,8 @@ local function _send_recieve(cli, request)
         -- to read in greedy mode.
         -- The socket read timeout will be used as a fallback when an exception is
         -- encountered and this does not end the loop.
-        if res and res.protocol_op == protocol.APP_NO.SearchResultDone then
+        if not multi_resp_hint or
+           (res and res.protocol_op == protocol.APP_NO.SearchResultDone) then
             break
         end
     end
@@ -229,7 +230,8 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
         types_only    or false, -- type only
         filter        or "(objectClass=posixAccount)", -- filter
         attributes    or {"objectClass"} -- attr
-    ))
+    ), true) -- mark as potential multi-response operation
+
     if not res then
         return false, err
     end
