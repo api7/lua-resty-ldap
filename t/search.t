@@ -114,9 +114,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 2, "result length is not equal to 2")
+            assert(#res == 1, "result length is not equal to 1")
             assert(res[1].entryDN == "ou=users,dc=example,dc=org", "result 1 entryDN is not equal to ou=users,dc=example,dc=org")
-            assert(res[2].entryDN == "ou=groups,dc=example,dc=org", "result 2 entryDN is not equal to ou=groups,dc=example,dc=org")
         }
     }
 --- request
@@ -170,7 +169,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, 1, nil, nil,
+                nil, nil, 1, nil, nil,
                 "(objectClass=posixAccount)"
             )
 
@@ -199,7 +198,7 @@ search failed, error: Size limit exceeded
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, 1, nil, nil,
+                nil, nil, 1, nil, nil,
                 "(&(objectClass=posixAccount)(uid=user01))"
             )
 
@@ -231,7 +230,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, 1, nil,
+                nil, nil, nil, 1, nil,
                 "(&(objectClass=posixAccount)(uid=user01))"
             )
 
@@ -263,7 +262,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, true,
+                nil, nil, nil, nil, true,
                 "(&(objectClass=posixAccount)(uid=user01))", {"uid"}
             )
 
@@ -295,7 +294,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(&(objectClass=posixAccount)(uid=user01))", {"uid"}
             )
 
@@ -327,7 +326,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(|(&(objectClass=posixAccount)(uid=user02))(&(objectClass=posixAccount)(uid=user01)))", {"uid"}
             )
 
@@ -360,7 +359,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(&(!(objectClass=posixAccount))(!(objectClass=organizationalUnit))(!(objectClass=groupOfNames)))"
             )
 
@@ -392,7 +391,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(&(objectClass=posixAccount)(uid=user*))"
             )
 
@@ -425,7 +424,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(&(objectClass=posixAccount)(uid=u*r0*))"
             )
 
@@ -458,7 +457,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(&(objectClass=posixAccount)(uid=*02))"
             )
 
@@ -490,7 +489,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(&(objectClass=posixAccount)(uid~=user0))"
             )
 
@@ -523,7 +522,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(&(objectClass=posixAccount)(uidNumber>=1001))"
             )
 
@@ -555,7 +554,7 @@ GET /t
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:search(
                 "dc=example,dc=org",
-                ldap_protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, false,
+                nil, nil, nil, nil, false,
                 "(&(objectClass=posixAccount)(uidNumber<=1000))"
             )
 
@@ -596,7 +595,7 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 6, "result length is not equal to 6")
+            assert(#res == 5, "result length is not equal to 5")
         }
     }
 --- request
