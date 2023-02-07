@@ -66,7 +66,7 @@ local cItemBody = function(item_type_hint, ...)
 end
 
 -- Simple types
-local rawValue = (P'_' + R('az', 'AZ')) * (P'_' + R '09' + R('az', 'AZ')) ^ 0
+local rawValue = (P'_' + R'09' + R('az', 'AZ')) * (P'_' + R'09' + R('az', 'AZ')) ^ 0
 
 -- Grammar
 local filter = P{
