@@ -18,13 +18,13 @@ local _M = {}
 local mt = { __index = _M }
 
 
-local function print_hex(data)
+local function to_hex_sequence(data)
     local str = ""
     for i = 1, #data do
         local char = string.sub(data, i, i)
         str = str .. string.format("%02x", string.byte(char)) .. " "
     end
-    log(DEBUG, str)
+    return str
 end
 
 local function calculate_payload_length(encStr, pos, socket)
@@ -143,7 +143,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
         local packet = socket:receive(packet_len)
         local res, err = asn1_parse_ldap_result(packet)
         if err then
-            return nil, "Invalid LDAP message encoding: " .. err
+            return nil, fmt("invalid ldap message encoding: %s, message: %s", err, to_hex_sequence(packet))
         end
         table_insert(result, res)
 
@@ -163,7 +163,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
     end
 
-    return #result == 1 and result[1] or result
+    return multi_resp_hint and result or result[1]
 end
 
 function _M.new(_, host, port, client_config)
@@ -221,7 +221,7 @@ end
 
 function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
                    types_only, filter, attributes)
-    local res, err = _send_recieve(self, protocol.search_request(
+    local search_req, err = protocol.search_request(
         base_dn       or 'dc=example,dc=org',
         scope         or protocol.SEARCH_SCOPE_WHOLE_SUBTREE,
         deref_aliases or protocol.SEARCH_DEREF_ALIASES_ALWAYS,
@@ -230,14 +230,25 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
         types_only    or false, -- type only
         filter        or "(objectClass=posixAccount)", -- filter
         attributes    or {"objectClass"} -- attr
-    ), true) -- mark as potential multi-response operation
+    )
+    if not search_req then
+        return false, err
+    end
 
+    local res, err = _send_recieve(self, search_req, true) -- mark as potential multi-response operation
     if not res then
         return false, err
     end
 
     for index, item in ipairs(res) do
         if item.protocol_op == protocol.APP_NO.SearchResultDone then
+            if item.result_code ~= 0 then
+                local error_msg = protocol.ERROR_MSG[item.result_code]
+                return false, fmt(
+                    "search failed, error: %s, details: %s",
+                    error_msg or ("Unknown error occurred (code: " .. item.result_code .. ")"),
+                    item.diagnostic_msg or "")
+            end
             res[index] = nil
         else
             res[index] = item.search_entries
