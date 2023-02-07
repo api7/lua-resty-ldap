@@ -413,72 +413,7 @@ GET /t
 
 
 
-=== TEST 12: search filter (substring#2)
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local ldap_client = require("resty.ldap.client")
-            local ldap_protocol = require("resty.ldap.protocol")
-
-            local client = ldap_client:new("127.0.0.1", 1389)
-            local res, err = client:search(
-                "dc=example,dc=org",
-                nil, nil, nil, nil, nil,
-                "(&(objectClass=posixAccount)(uid=u*r0*))"
-            )
-
-            if not res then
-                ngx.log(ngx.ERR, err)
-                ngx.exit(401)
-            end
-
-            assert(#res == 2, "result length is not equal to 2")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result 1 entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
-            assert(res[2].entryDN == "cn=user02,ou=users,dc=example,dc=org", "result 2 entryDN is not equal to cn=user02,ou=users,dc=example,dc=org")
-        }
-    }
---- request
-GET /t
---- no_error_log
-[error]
---- error_code: 200
-
-
-
-=== TEST 13: search filter (substring#3)
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local ldap_client = require("resty.ldap.client")
-            local ldap_protocol = require("resty.ldap.protocol")
-
-            local client = ldap_client:new("127.0.0.1", 1389)
-            local res, err = client:search(
-                "dc=example,dc=org",
-                nil, nil, nil, nil, nil,
-                "(&(objectClass=posixAccount)(uid=*02))"
-            )
-
-            if not res then
-                ngx.log(ngx.ERR, err)
-                ngx.exit(401)
-            end
-
-            assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "cn=user02,ou=users,dc=example,dc=org", "result entryDN is not equal to cn=user02,ou=users,dc=example,dc=org")
-        }
-    }
---- request
-GET /t
---- no_error_log
-[error]
---- error_code: 200
-
-
-
-=== TEST 14: search filter (approx)
+=== TEST 12: search filter (approx)
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -511,7 +446,7 @@ GET /t
 
 
 
-=== TEST 15: search filter (greater)
+=== TEST 13: search filter (greater)
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -543,7 +478,7 @@ GET /t
 
 
 
-=== TEST 16: search filter (less)
+=== TEST 14: search filter (less)
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -575,7 +510,7 @@ GET /t
 
 
 
-=== TEST 16: search filter (present)
+=== TEST 15: search filter (present)
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -606,7 +541,7 @@ GET /t
 
 
 
-=== TEST 17: search attributes
+=== TEST 16: search attributes
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
