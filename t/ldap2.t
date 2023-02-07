@@ -79,7 +79,7 @@ GET /t
 --- request
 GET /t
 --- error_log
-Error: The supplied credential is invalid.
+Error: The supplied credential is invalid
 --- error_code: 401
 
 
