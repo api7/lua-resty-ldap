@@ -403,6 +403,7 @@ GET /t
             assert(#res == 2, "result length is not equal to 2")
             assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result 1 entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
             assert(res[2].entryDN == "cn=user02,ou=users,dc=example,dc=org", "result 2 entryDN is not equal to cn=user02,ou=users,dc=example,dc=org")
+            ngx.sleep(1)
         }
     }
 --- request
@@ -436,6 +437,7 @@ ngx.log(ngx.ERR, #res, " ", require('cjson').encode(res))
             assert(#res == 2, "result length is not equal to 2")
             assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result 1 entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
             assert(res[2].entryDN == "cn=user02,ou=users,dc=example,dc=org", "result 2 entryDN is not equal to cn=user02,ou=users,dc=example,dc=org")
+            ngx.sleep(1)
         }
     }
 --- request
