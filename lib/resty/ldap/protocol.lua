@@ -11,12 +11,12 @@ local _M = {}
 local ldapMessageId = 1
 
 _M.ERROR_MSG = {
-    [1]  = "Initialization of LDAP library failed.",
-    [4]  = "Size limit exceeded.",
+    [1]  = "Initialization of LDAP library failed",
+    [4]  = "Size limit exceeded",
     [13] = "Confidentiality required",
     [32] = "No such object",
     [34] = "Invalid DN",
-    [49] = "The supplied credential is invalid."
+    [49] = "The supplied credential is invalid"
 }
 
 _M.APP_NO = {
@@ -82,25 +82,24 @@ local function build_asn1_filter(filter)
             return asn1_put_object(6, asn1.CLASS.CONTEXT_SPECIFIC, 1, body)
         end
     elseif item_type == filter_compiler.ITEM_TYPE_PRESENT then
-        return asn1_put_object(7, asn1.CLASS.CONTEXT_SPECIFIC, 1, attribute_description)
+        -- present is a special case, it uses primitive instead of
+        -- constructed, the rest of several are constructed.
+        return asn1_put_object(7, asn1.CLASS.CONTEXT_SPECIFIC, 0, attribute_description)
     elseif item_type == filter_compiler.ITEM_TYPE_SUBSTRING then
         local body = ""
         local attribute_value_len = #attribute_value
 
         for index, value in ipairs(attribute_value) do
-            if index == 1 and value ~= "*" then
+            if index == 1 and value ~= "*" then -- initial
                 -- This means that the values do not start with *,
                 -- so we need to use the initial field in the substring filter.
-                body = body .. asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0,
-                                               asn1_encode(value, asn1.TAG.OCTET_STRING))
-            elseif index == attribute_value_len and value ~= "*" then
+                body = body .. asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, value)
+            elseif index == attribute_value_len and value ~= "*" then -- final
                 -- This means that the values do not start with *,
                 -- so we need to use the final field in the substring filter.
-                body = body .. asn1_put_object(2, asn1.CLASS.CONTEXT_SPECIFIC, 0,
-                                               asn1_encode(value, asn1.TAG.OCTET_STRING))
-            else
-                body = body .. asn1_put_object(1, asn1.CLASS.CONTEXT_SPECIFIC, 0,
-                                               asn1_encode(value, asn1.TAG.OCTET_STRING))
+                body = body .. asn1_put_object(2, asn1.CLASS.CONTEXT_SPECIFIC, 0, value)
+            elseif value ~= "*" then -- any
+                body = body .. asn1_put_object(1, asn1.CLASS.CONTEXT_SPECIFIC, 0, value)
             end
         end
         return asn1_put_object(4, asn1.CLASS.CONTEXT_SPECIFIC, 1,
@@ -121,12 +120,26 @@ local function build_asn1_filters(filter_tbl)
         return build_asn1_filter(filter_tbl)
     end
 
+    if filter_tbl.op_type and filter_tbl.op_type == filter_compiler.OP_TYPE_NOT and
+        filter_tbl.items and #filter_tbl.items == 1 then
+        return asn1_put_object(
+                    2, -- not 2
+                    asn1.CLASS.CONTEXT_SPECIFIC, 1,
+                    build_asn1_filter(filter_tbl.items[1])
+               )
+    end
+
     if filter_tbl.op_type and filter_tbl.items and #filter_tbl.items > 1 then
         local sub_filter = ''
         for _, item in ipairs(filter_tbl.items) do
             sub_filter = sub_filter .. build_asn1_filters(item)
         end
-        return asn1_encode(sub_filter, asn1.TAG.SET)
+
+        return asn1_put_object(
+                    filter_tbl.op_type == filter_compiler.OP_TYPE_AND and 0 or 1, -- 'and' 0 or 'or' 1
+                    asn1.CLASS.CONTEXT_SPECIFIC, 1,
+                    sub_filter
+               )
     end
 
     -- Provide a default filter, i.e. (objectClass=*)
@@ -146,8 +159,10 @@ function _M.search_request(base_obj, scope, deref_aliases, size_limit, time_limi
     local types_only = asn1_encode(types_only, asn1.TAG.BOOLEAN)
 
     -- compile filter
-    --local filter = asn1_put_object(7, asn1.CLASS.CONTEXT_SPECIFIC, 0, "objectClass")
-    local filter_tbl = filter_compiler.compile(filter)
+    local filter_tbl, err = filter_compiler.compile(filter)
+    if not filter_tbl then
+        return nil, err
+    end
     local filter = build_asn1_filters(filter_tbl)
 
     -- encode attributes to sequence
