@@ -122,7 +122,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
         -- body packet.
         local len, err = reader(2)
         if not len then
-            if err == "timeout" then -- error on read timeout is nil
+            if err == "timeout" then
                 socket:close()
                 return nil, err
             end
@@ -131,7 +131,14 @@ local function _send_recieve(cli, request, multi_resp_hint)
         local _, packet_len = calculate_payload_length(len, 2, socket)
 
         -- Get the data of the specified length
-        local packet = socket:receive(packet_len)
+        local packet, err = socket:receive(packet_len)
+        if not packet then
+            -- When the packet header is read but the packet body cannot be read,
+            -- this error is considered unacceptable and therefore an error is
+            -- returned directly instead of processing the received data.
+            socket:close()
+            return nil, err
+        end
         local res, err = asn1_parse_ldap_result(packet)
         if err then
             return nil, fmt("invalid ldap message encoding: %s, message: %s", err, resty_string.to_hex(packet))
