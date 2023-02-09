@@ -2,6 +2,7 @@ local bunpack  = require "lua_pack".unpack
 local ldap     = require "resty.ldap.ldap"
 local protocol = require "resty.ldap.protocol"
 local asn1     = require "resty.ldap.asn1"
+local resty_string = require("resty.string")
 
 local tostring     = tostring
 local fmt          = string.format
@@ -16,16 +17,6 @@ local asn1_parse_ldap_result = asn1.parse_ldap_result
 
 local _M = {}
 local mt = { __index = _M }
-
-
-local function to_hex_sequence(data)
-    local str = ""
-    for i = 1, #data do
-        local char = string.sub(data, i, i)
-        str = str .. string.format("%02x", string.byte(char)) .. " "
-    end
-    return str
-end
 
 local function calculate_payload_length(encStr, pos, socket)
     local elen
@@ -143,7 +134,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
         local packet = socket:receive(packet_len)
         local res, err = asn1_parse_ldap_result(packet)
         if err then
-            return nil, fmt("invalid ldap message encoding: %s, message: %s", err, to_hex_sequence(packet))
+            return nil, fmt("invalid ldap message encoding: %s, message: %s", err, resty_string.to_hex(packet))
         end
         table_insert(result, res)
 

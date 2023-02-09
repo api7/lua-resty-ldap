@@ -15,6 +15,7 @@ description = {
 dependencies = {
    "lua_pack = 2.0.0-0"
    "lpeg = 1.0.2-1"
+   "lua-resty-string = 0.09-0"
 }
 
 build = {
