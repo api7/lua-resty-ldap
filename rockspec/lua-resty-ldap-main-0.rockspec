@@ -15,7 +15,6 @@ description = {
 dependencies = {
    "lua_pack = 2.0.0-0"
    "lpeg = 1.0.2-1"
-   "lua-resty-string = 0.09-0"
 }
 
 build = {
@@ -24,5 +23,8 @@ build = {
     ["resty.ldap"] = "lib/resty/ldap/init.lua",
     ["resty.ldap.asn1"] = "lib/resty/ldap/asn1.lua",
     ["resty.ldap.ldap"] = "lib/resty/ldap/ldap.lua",
+    ["resty.ldap.client"] = "lib/resty/ldap/client.lua",
+    ["resty.ldap.protocol"] = "lib/resty/ldap/protocol.lua",
+    ["resty.ldap.filter"] = "lib/resty/ldap/filter.lua",
    }
 }
