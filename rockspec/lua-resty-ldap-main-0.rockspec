@@ -23,5 +23,8 @@ build = {
     ["resty.ldap"] = "lib/resty/ldap/init.lua",
     ["resty.ldap.asn1"] = "lib/resty/ldap/asn1.lua",
     ["resty.ldap.ldap"] = "lib/resty/ldap/ldap.lua",
+    ["resty.ldap.client"] = "lib/resty/ldap/client.lua",
+    ["resty.ldap.protocol"] = "lib/resty/ldap/protocol.lua",
+    ["resty.ldap.filter"] = "lib/resty/ldap/filter.lua",
    }
 }

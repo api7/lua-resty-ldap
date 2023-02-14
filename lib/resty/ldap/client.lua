@@ -2,19 +2,21 @@ local bunpack  = require "lua_pack".unpack
 local ldap     = require "resty.ldap.ldap"
 local protocol = require "resty.ldap.protocol"
 local asn1     = require "resty.ldap.asn1"
+local resty_string = require("resty.string")
 
-local tostring = tostring
-local fmt      = string.format
-local log      = ngx.log
-local ERR      = ngx.ERR
-local tcp      = ngx.socket.tcp
+local tostring     = tostring
+local fmt          = string.format
+local log          = ngx.log
+local ERR          = ngx.ERR
+local DEBUG        = ngx.DEBUG
+local tcp          = ngx.socket.tcp
+local table_insert = table.insert
 
 local asn1_parse_ldap_result = asn1.parse_ldap_result
 
 
 local _M = {}
 local mt = { __index = _M }
-
 
 local function calculate_payload_length(encStr, pos, socket)
     local elen
@@ -97,31 +99,69 @@ local function _send(cli, request)
     end
 end
 
-local function _send_recieve(cli, request)
+local function _send_recieve(cli, request, multi_resp_hint)
     local err = _send(cli, request)
     if err then
         return nil, err
     end
 
     local socket = cli.socket
-    local len, err = socket:receive(2)
-    if not len then
-        if err == "timeout" then
+
+    -- Each response in a multi-response body has ASCII NULL(0x00) as its ending,
+    -- so here the reader is created using receiveuntil.
+    local reader = socket:receiveuntil(string.char(0x00))
+
+    local result = {}
+    -- When the client sends a search request, the server will return several
+    -- different entries in a string-like concatenation, sto we must use a
+    -- loop to complete the bulk extraction of the data.
+    -- This does not affect the response of a single "response body".
+    while true do
+        -- Takes the packet header of a single request body, which has a length
+        -- of two bytes, where the second byte is the length of this response
+        -- body packet.
+        local len, err = reader(2)
+        if not len then
+            if err == "timeout" then
+                socket:close()
+                return nil, err
+            end
+            break -- read done, data has been taken to the end
+        end
+        local _, packet_len = calculate_payload_length(len, 2, socket)
+
+        -- Get the data of the specified length
+        local packet, err = socket:receive(packet_len)
+        if not packet then
+            -- When the packet header is read but the packet body cannot be read,
+            -- this error is considered unacceptable and therefore an error is
+            -- returned directly instead of processing the received data.
             socket:close()
             return nil, err
         end
-        return nil, err
+        local res, err = asn1_parse_ldap_result(packet)
+        if err then
+            return nil, fmt("invalid ldap message encoding: %s, message: %s", err, resty_string.to_hex(packet))
+        end
+        table_insert(result, res)
+
+        -- This is an ugly patch to actively stop continuous reading. When a search
+        -- request ends, the last result will be SearchResultDone, at which point
+        -- the continuous reading stops.
+        -- The deeper reason is that the LDAP protocol does not provide a global
+        -- field that specifies the total length of this protocol packet, it is
+        -- just a straight stack of LDAP messages. Therefore the parser implementor
+        -- does not know exactly how many bytes of data should be fetched, and has
+        -- to read in greedy mode.
+        -- The socket read timeout will be used as a fallback when an exception is
+        -- encountered and this does not end the loop.
+        if not multi_resp_hint or
+           (res and res.protocol_op == protocol.APP_NO.SearchResultDone) then
+            break
+        end
     end
 
-    local _, packet_len = calculate_payload_length(len, 2, socket)
-    local packet = socket:receive(packet_len)
-
-    local res, err = asn1_parse_ldap_result(packet)
-    if err then
-        return nil, "Invalid LDAP message encoding: " .. err
-    end
-
-    return res
+    return multi_resp_hint and result or result[1]
 end
 
 function _M.new(_, host, port, client_config)
@@ -175,5 +215,46 @@ function _M.simple_bind(self, dn, password)
 
     return true
 end
+
+
+function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
+                   types_only, filter, attributes)
+    local search_req, err = protocol.search_request(
+        base_dn       or 'dc=example,dc=org',
+        scope         or protocol.SEARCH_SCOPE_WHOLE_SUBTREE,
+        deref_aliases or protocol.SEARCH_DEREF_ALIASES_ALWAYS,
+        size_limit    or 0, -- size limit
+        time_limit    or 0, -- time limit
+        types_only    or false, -- type only
+        filter        or "(objectClass=posixAccount)", -- filter
+        attributes    or {"objectClass"} -- attr
+    )
+    if not search_req then
+        return false, err
+    end
+
+    local res, err = _send_recieve(self, search_req, true) -- mark as potential multi-response operation
+    if not res then
+        return false, err
+    end
+
+    for index, item in ipairs(res) do
+        if item.protocol_op == protocol.APP_NO.SearchResultDone then
+            if item.result_code ~= 0 then
+                local error_msg = protocol.ERROR_MSG[item.result_code]
+                return false, fmt(
+                    "search failed, error: %s, details: %s",
+                    error_msg or ("Unknown error occurred (code: " .. item.result_code .. ")"),
+                    item.diagnostic_msg or "")
+            end
+            res[index] = nil
+        else
+            res[index] = item.search_entries
+        end
+    end
+
+    return res
+end
+
 
 return _M
