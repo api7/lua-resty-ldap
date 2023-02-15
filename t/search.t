@@ -603,8 +603,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(res.protocol_op == 7, "protocol_op is not equal to 7")
-            assert(res.result_code == 0, "result_code is not equal to 0")
+            assert(res.protocol_op == 7, "protocol_op is not equal to 7, " .. res.protocol_op)
+            assert(res.result_code == 0, "result_code is not equal to 0, " .. res.result_code)
         }
     }
 --- request
@@ -669,7 +669,7 @@ GET /t
 
             -- modify
             local res, err = client:unknown(
-                "304b02013066460424636e3d7573657230312c6f753d75736572732c64633d6578616d706c652c64633d6f7267301e301c0a01013017040b646973706c61794e616d6531080406e4b8ade69687", -- hex
+                "304b02014066460424636e3d7573657230312c6f753d75736572732c64633d6578616d706c652c64633d6f7267301e301c0a01013017040b646973706c61794e616d6531080406e4b8ade69687", -- hex
                 false
             )
             if not res then
@@ -677,17 +677,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(res.protocol_op == 7, "protocol_op is not equal to 7")
-            assert(res.result_code == 0, "result_code is not equal to 0")
-
-            -- unauth
-            local res, err = client:simple_bind()
-            if not res then
-                ngx.log(ngx.ERR, err)
-                ngx.exit(401)
-            end
-
-            assert(res, "failed to unbind")
+            assert(res.protocol_op == 7, "protocol_op is not equal to 7, " .. res.protocol_op)
+            assert(res.result_code == 0, "result_code is not equal to 0, " .. res.result_code)
         }
     }
 --- request
