@@ -591,7 +591,7 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(res, "failed bind to admin")
+            assert(res, "failed to bind admin")
 
             -- modify
             local res, err = client:unknown(
