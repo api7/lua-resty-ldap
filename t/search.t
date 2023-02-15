@@ -665,7 +665,7 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(res, "failed bind to admin")
+            assert(res, "failed to bind admin")
 
             -- modify
             local res, err = client:unknown(
@@ -679,6 +679,15 @@ GET /t
 
             assert(res.protocol_op == 7, "protocol_op is not equal to 7")
             assert(res.result_code == 0, "result_code is not equal to 0")
+
+            -- unauth
+            local res, err = client:simple_bind()
+            if not res then
+                ngx.log(ngx.ERR, err)
+                ngx.exit(401)
+            end
+
+            assert(res, "failed to unbind")
         }
     }
 --- request
