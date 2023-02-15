@@ -124,3 +124,11 @@ To load this module:
 `filter` is an LDAP filter expression in string. Default is `(objectClass=posixAccount)`.
 
 `attributes` is an array table that contains one to more query fields that you need to have the LDAP server return. Default is `["objectClass"]`.
+
+#### unknown
+
+**syntax:** *res, err = client:unknown(hex_data, multi_resp_hint?)*
+
+`hex_data` is the protocol data connected in hexadecimal, converting ASN.1 binary data directly to hexadecimal. This field is required.
+
+`multi_resp_hint` is a metric used to indicate whether the LDAP response parser is parsing multiple response bodies. Multi-response are typically used in scenarios such as search, where multiple LDAP result data is seamlessly connected. Default is `false`.
