@@ -132,3 +132,5 @@ To load this module:
 `hex_data` is the protocol data connected in hexadecimal, converting ASN.1 binary data directly to hexadecimal. This field is required.
 
 `multi_resp_hint` is a metric used to indicate whether the LDAP response parser is parsing multiple response bodies. Multi-response are typically used in scenarios such as search, where multiple LDAP result data is seamlessly connected. Default is `false`.
+
+Note that this operation will not automatically add any LDAP protocol headers, such as message id, etc., everything will need to be handled by yourself. In general, please do not use it unless you fully understand the functionality of this function and the LDAP protocol itself.
