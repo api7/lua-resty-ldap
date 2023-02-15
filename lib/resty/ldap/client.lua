@@ -260,7 +260,7 @@ end
 
 function _M.unknown(self, hex_data, multi_resp_hint)
     local raw_data = hex_data:gsub("%x%x", function(digits) return string_char(tonumber(digits, 16)) end)
-    local res, err = _send_recieve(self, raw_data, multi_resp_hint)
+    local res, err = _send_recieve(self, raw_data, multi_resp_hint or false)
     if not res then
         return false, err
     end
