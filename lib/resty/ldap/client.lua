@@ -95,20 +95,20 @@ local function _init_socket(self)
     self.socket = sock
 end
 
-local function _send(cli, request)
-    local bytes, err = cli.socket:send(request)
-    if not bytes then
-        return err
-    end
-end
-
 local function _send_recieve(cli, request, multi_resp_hint)
-    local err = _send(cli, request)
+    -- initialize socket
+    local err = _init_socket(cli)
     if err then
         return nil, err
     end
 
     local socket = cli.socket
+
+    -- send req
+    local bytes, err = cli.socket:send(request)
+    if not bytes then
+        return nil, err
+    end
 
     -- Each response in a multi-response body has ASCII NULL(0x00) as its ending,
     -- so here the reader is created using receiveuntil.
@@ -196,11 +196,6 @@ function _M.new(_, host, port, client_config)
         port = port,
         socket_config = socket_config,
     }, mt)
-
-    local err = _init_socket(cli)
-    if err then
-        return nil, err
-    end
 
     return cli
 end
