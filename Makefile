@@ -23,3 +23,4 @@ help:
 test:
 	git apply t/patch/unknown_op.patch
 	prove -r t/
+	git apply t/patch/unknown_op.patch -R
