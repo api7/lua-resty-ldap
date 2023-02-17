@@ -151,3 +151,43 @@ GET /t
 --- no_error_log
 [error]
 --- error_code: 200
+
+
+
+=== TEST 7: connection reuse
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require "resty.ldap.client"
+
+            local client1 = ldap_client:new("127.0.0.1", 1389, {
+                pool_name = "ldap-test"
+            })
+            client1:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1") -- will trigger the setkeepalive
+
+            local client2 = ldap_client:new("127.0.0.1", 1389, {
+                pool_name = "ldap-test"
+            })
+            client2:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
+
+            local client3 = ldap_client:new("127.0.0.1", 1389, {
+                pool_name = "ldap-test"
+            })
+
+            local client4 = ldap_client:new("127.0.0.1", 1389, {
+                pool_name = "ldap-test2"
+            })
+
+            local count1 = client3.socket:getreusedtimes()
+            assert(count1 == 2, "socket in ldap-test reuse count not equal to 2, actual " .. count1)
+
+            local count2 = client4.socket:getreusedtimes()
+            assert(count2 == 0, "socket in ldap-test2 reuse count not equal to 0, actual " .. count2)
+        }
+    }
+--- request
+GET /t
+--- no_error_log
+[error]
+--- error_code: 200
