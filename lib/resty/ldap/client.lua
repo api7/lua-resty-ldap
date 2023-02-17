@@ -11,7 +11,6 @@ local ERR          = ngx.ERR
 local DEBUG        = ngx.DEBUG
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
-local string_char  = string.char
 
 local asn1_parse_ldap_result = asn1.parse_ldap_result
 
@@ -254,16 +253,6 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
         end
     end
 
-    return res
-end
-
-
-function _M.unknown(self, hex_data, multi_resp_hint)
-    local raw_data = hex_data:gsub("%x%x", function(digits) return string_char(tonumber(digits, 16)) end)
-    local res, err = _send_recieve(self, raw_data, multi_resp_hint or false)
-    if not res then
-        return false, err
-    end
     return res
 end
 
