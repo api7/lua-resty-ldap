@@ -21,4 +21,6 @@ help:
 	@grep -E '^### [-A-Za-z0-9_]+:' Makefile | sed 's/###/   /'
 
 test:
+	git apply t/patch/unknown_op.patch
 	prove -r t/
+	git apply t/patch/unknown_op.patch -R

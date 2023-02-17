@@ -1,0 +1,19 @@
+diff --git a/lib/resty/ldap/client.lua b/lib/resty/ldap/client.lua
+index 6b8eb18..45cef3f 100644
+--- a/lib/resty/ldap/client.lua
++++ b/lib/resty/ldap/client.lua
+@@ -257,4 +257,14 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
+ end
+ 
+ 
++function _M.unknown(self, hex_data, multi_resp_hint)
++    local raw_data = hex_data:gsub("%x%x", function(digits) return string.char(tonumber(digits, 16)) end)
++    local res, err = _send_recieve(self, raw_data, multi_resp_hint or false)
++    if not res then
++        return false, err
++    end
++    return res
++end
++
++
+ return _M
