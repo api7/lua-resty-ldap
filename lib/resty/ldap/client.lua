@@ -11,6 +11,7 @@ local ERR          = ngx.ERR
 local DEBUG        = ngx.DEBUG
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
+local string_char  = string.char
 
 local asn1_parse_ldap_result = asn1.parse_ldap_result
 
@@ -112,7 +113,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
 
     -- Each response in a multi-response body has ASCII NULL(0x00) as its ending,
     -- so here the reader is created using receiveuntil.
-    local reader = socket:receiveuntil(string.char(0x00))
+    local reader = socket:receiveuntil(string_char(0x00))
 
     local result = {}
     -- When the client sends a search request, the server will return several
