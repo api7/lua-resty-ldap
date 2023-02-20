@@ -89,9 +89,11 @@ To load this module:
 | ----------- | ----------- | ----------- | ----------- |
 | `socket_timeout`      | number       | 10000      | An optional timeout in milliseconds when waiting for connection with LDAP server.       |
 | `keepalive_timeout`   | number       | 60000      | An optional value in milliseconds that defines how long an idle connection to LDAP server will live before being closed.       |
-| `start_tls`      | boolean       | false      | Set it to `true` to issue StartTLS (Transport Layer Security) extended operation over ldap connection. If the start_tls setting is enabled, ensure the ldaps setting is disabled.       |
-| `ldaps`      | boolean       | false      | Set to `true` to connect using the LDAPS protocol (LDAP over TLS). When ldaps is configured, you must use port 636. If the ldap setting is enabled, ensure the start_tls setting is disabled.       |
-| `ssl_verify`      | boolean       | false      | Set to true to authenticate LDAP server. The server certificate will be verified according to the CA certificates specified by the `lua_ssl_trusted_certificate` directive.       |
+| `start_tls`           | boolean      | false      | Set it to `true` to issue StartTLS (Transport Layer Security) extended operation over ldap connection. If the start_tls setting is enabled, ensure the ldaps setting is disabled.       |
+| `ldaps`               | boolean      | false      | Set to `true` to connect using the LDAPS protocol (LDAP over TLS). When ldaps is configured, you must use port 636. If the ldap setting is enabled, ensure the start_tls setting is disabled.       |
+| `ssl_verify`          | boolean      | false      | Set to true to authenticate LDAP server. The server certificate will be verified according to the CA certificates specified by the `lua_ssl_trusted_certificate` directive.       |
+| `pool_name`           | string       | host:ip  | Set and override the default connection pool name for scenarios where the same connection parameters are used but with a different authentication method. The default value is the same as the OpenResty rule, and the value is the `host:port` of the LDAP server. |
+| `pool_size`           | number       | 2          | Set the size of a certain connection pool. According to OpenResty's rule, it can only be set when the pool is created and cannot be changed dynamically. |
 
 #### simple_bind
 
