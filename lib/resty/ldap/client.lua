@@ -11,6 +11,7 @@ local ERR          = ngx.ERR
 local DEBUG        = ngx.DEBUG
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
+local string_char  = string.char
 
 local asn1_parse_ldap_result = asn1.parse_ldap_result
 
@@ -51,11 +52,14 @@ local function _init_socket(self)
 
     -- keep TLS connections in a separate pool to avoid reusing non-secure
     -- connections and vice-versa, because STARTTLS use the same port
-    local opts = {}
-    if socket_config.start_tls then
-        opts = {
-            pool = host .. ":" .. port .. ":starttls"
-        }
+    local opts = {
+        pool = host .. ":" .. port .. (socket_config.start_tls and ":starttls" or ""),
+        pool_size = socket_config.pool_size,
+    }
+
+    -- override the value when the user specifies connection pool name
+    if socket_config.pool_name and socket_config.pool_name ~= "" then
+        opts.pool = socket_config.pool_name
     end
 
     local ok, err = sock:connect(host, port, opts)
@@ -92,24 +96,24 @@ local function _init_socket(self)
     self.socket = sock
 end
 
-local function _send(cli, request)
-    local bytes, err = cli.socket:send(request)
-    if not bytes then
-        return err
-    end
-end
-
 local function _send_recieve(cli, request, multi_resp_hint)
-    local err = _send(cli, request)
+    -- initialize socket
+    local err = _init_socket(cli)
     if err then
         return nil, err
     end
 
     local socket = cli.socket
 
+    -- send req
+    local bytes, err = cli.socket:send(request)
+    if not bytes then
+        return nil, err
+    end
+
     -- Each response in a multi-response body has ASCII NULL(0x00) as its ending,
     -- so here the reader is created using receiveuntil.
-    local reader = socket:receiveuntil(string.char(0x00))
+    local reader = socket:receiveuntil(string_char(0x00))
 
     local result = {}
     -- When the client sends a search request, the server will return several
@@ -161,8 +165,12 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
     end
 
+    -- put back into the connection pool
+    socket:setkeepalive(cli.socket_config.keepalive_timeout)
+
     return multi_resp_hint and result or result[1]
 end
+
 
 function _M.new(_, host, port, client_config)
     if not host or not port then
@@ -173,10 +181,15 @@ function _M.new(_, host, port, client_config)
     local socket_config = {
         socket_timeout = opts.socket_timeout or 10000,
         keepalive_timeout = opts.keepalive_timeout or (60 * 1000), -- 10 min
-        -- keepalive_size = opts.keepalive_size or 2,
         start_tls = opts.start_tls or false,
         ldaps = opts.ldaps or false,
         ssl_verify = opts.ssl_verify or false,
+
+        -- Specify the connection pool name directly to ensure that connections
+        -- with the same connection parameters but using different authentication
+        -- methods are not put into the same pool.
+        pool_name = opts.pool_name or nil,
+        pool_size = opts.pool_size or 2,
     }
 
     local cli = setmetatable({
@@ -184,11 +197,6 @@ function _M.new(_, host, port, client_config)
         port = port,
         socket_config = socket_config,
     }, mt)
-
-    local err = _init_socket(cli)
-    if err then
-        return nil, err
-    end
 
     return cli
 end
