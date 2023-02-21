@@ -2,7 +2,7 @@ local bunpack  = require "lua_pack".unpack
 local ldap     = require "resty.ldap.ldap"
 local protocol = require "resty.ldap.protocol"
 local asn1     = require "resty.ldap.asn1"
-local resty_string = require("resty.string")
+local to_hex   = require("resty.string").to_hex
 
 local tostring     = tostring
 local fmt          = string.format
@@ -42,6 +42,47 @@ local function calculate_payload_length(encStr, pos, socket)
     return pos, elen
 end
 
+local function _start_tls(sock, host, port)
+    -- send STARTTLS request
+    local bytes, err = sock:send(protocol.start_tls_request())
+    if not bytes then
+        return fmt("send request failed: %s", err)
+    end
+
+    -- receive STARTTLS response
+    local len, err = sock:receive(2)
+    if not len then
+        if err == "timeout" then
+            sock:close()
+        end
+        return fmt("receive response header failed: %s", err)
+    end
+    local _, packet_len = calculate_payload_length(len, 2, sock)
+
+    local packet, err = sock:receive(packet_len)
+    if not packet then
+        sock:close()
+        return fmt("receive response failed: %s", err)
+    end
+    local res, err = asn1_parse_ldap_result(packet)
+    if err then
+        return fmt("invalid ldap message encoding: %s, message: %s", err, to_hex(packet))
+    end
+
+    if res.protocol_op ~= protocol.APP_NO.ExtendedResponse then
+        return fmt("received incorrect op in packet: %d, expected %d",
+                    res.protocol_op, protocol.APP_NO.ExtendedResponse)
+    end
+
+    if res.result_code ~= 0 then
+        local error_msg = protocol.ERROR_MSG[res.result_code]
+
+        return fmt("error: %s, details: %s",
+                    error_msg or "Unknown error occurred (code: " .. res.result_code .. ")",
+                    res.diagnostic_msg or "")
+    end
+end
+
 local function _init_socket(self)
     local host = self.host
     local port = self.port
@@ -64,9 +105,7 @@ local function _init_socket(self)
 
     local ok, err = sock:connect(host, port, opts)
     if not ok then
-        log(ERR, "failed to connect to ", host, ":",
-            tostring(port), ": ", err)
-        return err
+        return fmt("connect to %s:%s failed: %s", host, tostring(port), err)
     end
 
     if socket_config.start_tls then
@@ -74,13 +113,16 @@ local function _init_socket(self)
         local count, err = sock:getreusedtimes()
         if not count then
             -- connection was closed, just return instead
-            return err
+            return fmt("get %s:%s connection re-used time failed: %s",
+                        host, tostring(port), err)
         end
 
         if count == 0 then
-            local ok, err = ldap.start_tls(sock)
-            if not ok then
-                return err
+            -- STARTTLS
+            local err = _start_tls(sock, host, port)
+            if err then
+                return fmt("launch STARTTLS connection on %s:%s failed: %s",
+                            host, tostring(port), err)
             end
         end
     end
@@ -88,8 +130,8 @@ local function _init_socket(self)
     if socket_config.start_tls or socket_config.ldaps then
         _, err = sock:sslhandshake(true, host, socket_config.ssl_verify)
         if err ~= nil then
-            return fmt("failed to do SSL handshake with %s:%s: %s",
-                host, tostring(port), err)
+            return fmt("do TLS handshake on %s:%s failed: %s",
+                        host, tostring(port), err)
         end
     end
 
@@ -100,7 +142,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
     -- initialize socket
     local err = _init_socket(cli)
     if err then
-        return nil, err
+        return nil, fmt("initialize socket failed: %s", err)
     end
 
     local socket = cli.socket
@@ -108,7 +150,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
     -- send req
     local bytes, err = cli.socket:send(request)
     if not bytes then
-        return nil, err
+        return nil, fmt("send request failed: %s", err)
     end
 
     -- Each response in a multi-response body has ASCII NULL(0x00) as its ending,
@@ -128,7 +170,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
         if not len then
             if err == "timeout" then
                 socket:close()
-                return nil, err
+                return nil, fmt("receive response failed: %s", err)
             end
             break -- read done, data has been taken to the end
         end
@@ -145,7 +187,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
         local res, err = asn1_parse_ldap_result(packet)
         if err then
-            return nil, fmt("invalid ldap message encoding: %s, message: %s", err, resty_string.to_hex(packet))
+            return nil, fmt("invalid ldap message encoding: %s, message: %s", err, to_hex(packet))
         end
         table_insert(result, res)
 
