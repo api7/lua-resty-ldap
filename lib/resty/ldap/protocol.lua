@@ -43,7 +43,7 @@ end
 
 function _M.start_tls_request()
     local methodName = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, "1.3.6.1.4.1.1466.20037")
-    local ldapMsg = ldap_message(_M.APP_NO.BindRequest, methodName)
+    local ldapMsg = ldap_message(_M.APP_NO.ExtendedRequest, methodName)
     return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 end
 
