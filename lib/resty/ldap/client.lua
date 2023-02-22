@@ -1,7 +1,6 @@
-local bunpack  = require "lua_pack".unpack
-local ldap     = require "resty.ldap.ldap"
-local protocol = require "resty.ldap.protocol"
-local asn1     = require "resty.ldap.asn1"
+local bunpack  = require("lua_pack").unpack
+local protocol = require("resty.ldap.protocol")
+local asn1     = require("resty.ldap.asn1")
 local to_hex   = require("resty.string").to_hex
 
 local tostring     = tostring
