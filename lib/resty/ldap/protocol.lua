@@ -1,9 +1,8 @@
-local string_char     = string.char
-local string_sub      = string.sub
 local asn1            = require("resty.ldap.asn1")
 local filter_compiler = require("resty.ldap.filter")
 local asn1_put_object = asn1.put_object
 local asn1_encode     = asn1.encode
+local string_char     = string.char
 
 
 local _M = {}

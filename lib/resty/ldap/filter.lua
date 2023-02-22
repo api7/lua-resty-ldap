@@ -1,25 +1,25 @@
-local lpeg = require('lpeg')
+local lpeg = require("lpeg")
 local P, R, S, V = lpeg.P, lpeg.R, lpeg.S, lpeg.V
 local C, Ct, Cmt, Cg, Cp, Cc, Cf = lpeg.C, lpeg.Ct, lpeg.Cmt, lpeg.Cg, lpeg.Cp, lpeg.Cc, lpeg.Cf
 
-local string_char = string.char
-local string_sub = string.sub
+local string_char  = string.char
+local string_sub   = string.sub
 local table_insert = table.insert
 local table_concat = table.concat
 
 local _M = {}
 
 -- Const
-_M.OP_TYPE_AND = 'and'
-_M.OP_TYPE_OR = 'or'
-_M.OP_TYPE_NOT = 'not'
+_M.OP_TYPE_AND         = 'and'
+_M.OP_TYPE_OR          = 'or'
+_M.OP_TYPE_NOT         = 'not'
 _M.ITEM_TYPE_SUBSTRING = 'substring'
-_M.ITEM_TYPE_SIMPLE = 'simple'
-_M.ITEM_TYPE_PRESENT = 'present'
-_M.FILTER_TYPE_EQUAL = 'equal'
-_M.FILTER_TYPE_APPROX = 'approx'
+_M.ITEM_TYPE_SIMPLE    = 'simple'
+_M.ITEM_TYPE_PRESENT   = 'present'
+_M.FILTER_TYPE_EQUAL   = 'equal'
+_M.FILTER_TYPE_APPROX  = 'approx'
 _M.FILTER_TYPE_GREATER = 'greater'
-_M.FILTER_TYPE_LESS = 'less'
+_M.FILTER_TYPE_LESS    = 'less'
 
 
 local function pack(...)
