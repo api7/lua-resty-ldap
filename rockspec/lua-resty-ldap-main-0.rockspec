@@ -13,7 +13,7 @@ description = {
 }
 
 dependencies = {
-   "lua_pack = 2.0.0-0"
+   "lua_pack = 2.0.0-0",
    "lpeg = 1.0.2-1"
 }
 
