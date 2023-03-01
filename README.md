@@ -123,6 +123,6 @@ To load this module:
 
 `types_only` indicates whether search result entries should only include attribute descriptions (attribute type names or OIDs, followed by zero or more attribute options), rather than both attribute descriptions and values. This is a Boolean element. Default is `false`.
 
-`filter` is an LDAP filter expression in string. Default is `(objectClass=posixAccount)`.
+`filter` is an LDAP filter expression in string. Default is `(objectClass=*)`.
 
 `attributes` is an array table that contains one to more query fields that you need to have the LDAP server return. Default is `["objectClass"]`.

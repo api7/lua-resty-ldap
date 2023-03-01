@@ -275,7 +275,7 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
         size_limit    or 0, -- size limit
         time_limit    or 0, -- time limit
         types_only    or false, -- type only
-        filter        or "(objectClass=posixAccount)", -- filter
+        filter        or "(objectClass=*)", -- filter
         attributes    or {"objectClass"} -- attr
     )
     if not search_req then
