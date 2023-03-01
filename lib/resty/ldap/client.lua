@@ -94,12 +94,12 @@ local function _init_socket(self)
     -- connections and vice-versa, because STARTTLS use the same port
     local opts = {
         pool = host .. ":" .. port .. (socket_config.start_tls and ":starttls" or ""),
-        pool_size = socket_config.pool_size,
+        pool_size = socket_config.keepalive_pool_size,
     }
 
     -- override the value when the user specifies connection pool name
-    if socket_config.pool_name and socket_config.pool_name ~= "" then
-        opts.pool = socket_config.pool_name
+    if socket_config.keepalive_pool_name and socket_config.keepalive_pool_name ~= "" then
+        opts.pool = socket_config.keepalive_pool_name
     end
 
     local ok, err = sock:connect(host, port, opts)
@@ -229,8 +229,8 @@ function _M.new(_, host, port, client_config)
         -- Specify the connection pool name directly to ensure that connections
         -- with the same connection parameters but using different authentication
         -- methods are not put into the same pool.
-        pool_name = opts.pool_name or nil,
-        pool_size = opts.pool_size or 2,
+        keepalive_pool_name = opts.keepalive_pool_name or nil,
+        keepalive_pool_size = opts.keepalive_pool_size or 2,
     }
 
     local cli = setmetatable({
