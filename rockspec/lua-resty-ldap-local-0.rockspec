@@ -1,8 +1,7 @@
 package = "lua-resty-ldap"
-version = "main-0"
+version = "local-0"
 source = {
-   url = "git://github.com/api7/lua-resty-ldap",
-   branch = "main",
+   url = "file://."
 }
 
 description = {
