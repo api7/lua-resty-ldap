@@ -12,7 +12,7 @@ local DEBUG        = ngx.DEBUG
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local string_char  = string.char
-local rasn_decode  = rasn.decode
+local rasn_decode  = rasn.decode_ldap
 
 local asn1_parse_ldap_result = asn1.parse_ldap_result
 
