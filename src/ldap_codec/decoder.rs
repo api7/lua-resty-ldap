@@ -1,6 +1,7 @@
 use mlua::prelude::{Lua, LuaResult, LuaValue};
 use bytes::Bytes;
-use rasn_ldap::ProtocolOp;
+use rasn::der;
+use rasn_ldap::{LdapMessage, ProtocolOp};
 
 fn bytes_to_string(b: Bytes) -> Result<String, std::string::FromUtf8Error> {
     return String::from_utf8(b.to_vec());
@@ -20,7 +21,7 @@ pub fn decode<'lua>(
         }
     };
 
-    let lm = match rasn::der::decode::<rasn_ldap::LdapMessage>(der.as_bytes()) {
+    let lm = match der::decode::<LdapMessage>(der.as_bytes()) {
         Ok(lm) => lm,
         Err(err) => {
             let err_str = format!("{}", err.to_string());
