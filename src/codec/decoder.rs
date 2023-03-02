@@ -71,6 +71,17 @@ pub fn decode<'lua>(
             )?;
             return Ok((LuaValue::Table(result), LuaValue::Nil));
         }
+        ProtocolOp::ModifyResponse(resp0) => {
+            let resp = resp0.0;
+            result.set("protocol_op", 7)?;
+            result.set("result_code", resp.result_code as i64)?;
+            result.set("matched_dn", bytes_to_string(resp.matched_dn).unwrap())?;
+            result.set(
+                "diagnostic_msg",
+                bytes_to_string(resp.diagnostic_message).unwrap(),
+            )?;
+            return Ok((LuaValue::Table(result), LuaValue::Nil));
+        }
         ProtocolOp::SearchResRef(_) => {
             return Ok((
                 LuaValue::Nil,
