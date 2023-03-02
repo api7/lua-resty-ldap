@@ -190,7 +190,11 @@ local function _send_recieve(cli, request, multi_resp_hint)
         local packet = packet_header .. packet
         local ok, res, err = pcall(rasn_decode, packet)
         if not ok or err then
-            return nil, fmt("failed to decode ldap message: %s, message: %s", err, to_hex(packet))
+            return nil, fmt(
+                "failed to decode ldap message: %s, message: %s",
+                not ok and res or err, -- error returned in second value by pcall
+                to_hex(packet)
+            )
         end
 
         table_insert(result, res)
