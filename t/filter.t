@@ -8,7 +8,7 @@ plan 'no_plan';
 
 our $HttpConfig = <<'_EOC_';
     lua_package_path 'deps/share/lua/5.1/?.lua;/usr/share/lua/5.1/?.lua;;';
-    lua_package_cpath 'deps/?.so;;';
+    lua_package_cpath 'deps/lib/lua/5.1/?.so;;';
     resolver 127.0.0.53;
 _EOC_
 
