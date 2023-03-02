@@ -38,7 +38,7 @@ local function calculate_payload_length(encStr, pos, socket)
         elen = elenCalc
     end
 
-    return pos, elen
+    return pos, elen, encStr
 end
 
 local function _start_tls(sock, host, port)
@@ -173,7 +173,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
             end
             break -- read done, data has been taken to the end
         end
-        local _, packet_len = calculate_payload_length(len, 2, socket)
+        local _, packet_len, packet_header = calculate_payload_length(len, 2, socket)
 
         -- Get the data of the specified length
         local packet, err = socket:receive(packet_len)
@@ -184,10 +184,17 @@ local function _send_recieve(cli, request, multi_resp_hint)
             socket:close()
             return nil, err
         end
-        local res, err = asn1_parse_ldap_result(packet)
+
+        local rasn = require("rasn")
+        local res, err = rasn.decode(packet_header .. packet)
         if err then
-            return nil, fmt("invalid ldap message encoding: %s, message: %s", err, to_hex(packet))
+            return nil, fmt("failed to decode ldap message: %s, message: %s", err, to_hex(packet))
         end
+
+        --local res, err = asn1_parse_ldap_result(packet)
+        --if err then
+        --    return nil, fmt("invalid ldap message encoding: %s, message: %s", err, to_hex(packet))
+        --end
         table_insert(result, res)
 
         -- This is an ugly patch to actively stop continuous reading. When a search

@@ -7,7 +7,8 @@ repeat_each(1);
 plan 'no_plan';
 
 our $HttpConfig = <<'_EOC_';
-    lua_package_path 'lib/?.lua;lib/?/init.lua;/usr/local/share/lua/5.3/?.lua;/usr/share/lua/5.1/?.lua;;';
+    lua_package_path 'deps/?.lua;';
+    lua_package_cpath 'deps/?.so;';
     resolver 127.0.0.53;
 _EOC_
 
