@@ -37,9 +37,12 @@ jobs:
           sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
           sudo docker run hello-world
 
+          # rust
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+          # luarocks
           sudo apt -y install lua5.1 luarocks
-          sudo luarocks install lua_pack
-          sudo luarocks install lpeg
+          luarocks make rockspec/lua-resty-ldap-local-0.rockspec --local --tree ./deps # install deps to local
 
       - name: script
         run: |

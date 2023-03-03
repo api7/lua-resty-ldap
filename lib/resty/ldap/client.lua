@@ -2,6 +2,7 @@ local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
 local asn1     = require("resty.ldap.asn1")
 local to_hex   = require("resty.string").to_hex
+local rasn     = require("rasn")
 
 local tostring     = tostring
 local fmt          = string.format
@@ -11,6 +12,7 @@ local DEBUG        = ngx.DEBUG
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local string_char  = string.char
+local rasn_decode  = rasn.decode_ldap
 
 local asn1_parse_ldap_result = asn1.parse_ldap_result
 
@@ -38,7 +40,7 @@ local function calculate_payload_length(encStr, pos, socket)
         elen = elenCalc
     end
 
-    return pos, elen
+    return pos, elen, encStr
 end
 
 local function _start_tls(sock, host, port)
@@ -173,7 +175,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
             end
             break -- read done, data has been taken to the end
         end
-        local _, packet_len = calculate_payload_length(len, 2, socket)
+        local _, packet_len, packet_header = calculate_payload_length(len, 2, socket)
 
         -- Get the data of the specified length
         local packet, err = socket:receive(packet_len)
@@ -184,10 +186,17 @@ local function _send_recieve(cli, request, multi_resp_hint)
             socket:close()
             return nil, err
         end
-        local res, err = asn1_parse_ldap_result(packet)
-        if err then
-            return nil, fmt("invalid ldap message encoding: %s, message: %s", err, to_hex(packet))
+
+        local packet = packet_header .. packet
+        local ok, res, err = pcall(rasn_decode, packet)
+        if not ok or err then
+            return nil, fmt(
+                "failed to decode ldap message: %s, message: %s",
+                not ok and res or err, -- error returned in second value by pcall
+                to_hex(packet)
+            )
         end
+
         table_insert(result, res)
 
         -- This is an ugly patch to actively stop continuous reading. When a search
@@ -297,8 +306,6 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
                     item.diagnostic_msg or "")
             end
             res[index] = nil
-        else
-            res[index] = item.search_entries
         end
     end
 

@@ -7,7 +7,8 @@ repeat_each(1);
 plan 'no_plan';
 
 our $HttpConfig = <<'_EOC_';
-    lua_package_path 'lib/?.lua;lib/?/init.lua;/usr/local/share/lua/5.3/?.lua;/usr/share/lua/5.1/?.lua;;';
+    lua_package_path 'lib/?.lua;/usr/share/lua/5.1/?.lua;;';
+    lua_package_cpath 'deps/lib/lua/5.1/?.so;;';
     resolver 127.0.0.53;
 _EOC_
 
@@ -83,7 +84,7 @@ search failed, error: No such object
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "dc=example,dc=org", "result entryDN is not equal to dc=example,dc=org")
+            assert(res[1].entry_dn == "dc=example,dc=org", "result entry_dn is not equal to dc=example,dc=org")
             assert(#res[1].attributes.objectClass == 2, "result objectClass length is not equal to 2")
         }
     }
@@ -115,7 +116,7 @@ GET /t
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "ou=users,dc=example,dc=org", "result 1 entryDN is not equal to ou=users,dc=example,dc=org")
+            assert(res[1].entry_dn == "ou=users,dc=example,dc=org", "result 1 entry_dn is not equal to ou=users,dc=example,dc=org")
         }
     }
 --- request
@@ -146,8 +147,8 @@ GET /t
             end
 
             assert(#res == 2, "result length is not equal to 2")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result 1 entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
-            assert(res[2].entryDN == "cn=user02,ou=users,dc=example,dc=org", "result 2 entryDN is not equal to cn=user02,ou=users,dc=example,dc=org")
+            assert(res[1].entry_dn == "cn=user01,ou=users,dc=example,dc=org", "result 1 entry_dn is not equal to cn=user01,ou=users,dc=example,dc=org")
+            assert(res[2].entry_dn == "cn=user02,ou=users,dc=example,dc=org", "result 2 entry_dn is not equal to cn=user02,ou=users,dc=example,dc=org")
         }
     }
 --- request
@@ -208,7 +209,7 @@ search failed, error: Size limit exceeded
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
+            assert(res[1].entry_dn == "cn=user01,ou=users,dc=example,dc=org", "result entry_dn is not equal to cn=user01,ou=users,dc=example,dc=org")
         }
     }
 --- request
@@ -240,7 +241,7 @@ GET /t
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
+            assert(res[1].entry_dn == "cn=user01,ou=users,dc=example,dc=org", "result entry_dn is not equal to cn=user01,ou=users,dc=example,dc=org")
         }
     }
 --- request
@@ -304,7 +305,7 @@ GET /t
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].attributes.uid == "user01", "result uid attribute is not equal to user01")
+            assert(res[1].attributes.uid[1] == "user01", "result uid attribute is not equal to user01")
         }
     }
 --- request
@@ -336,8 +337,8 @@ GET /t
             end
 
             assert(#res == 2, "result length is not equal to 2")
-            assert(res[1].attributes.uid == "user01", "result 1 uid attribute is not equal to user02")
-            assert(res[2].attributes.uid == "user02", "result 2 uid attribute is not equal to user01")
+            assert(res[1].attributes.uid[1] == "user01", "result 1 uid attribute is not equal to user02")
+            assert(res[2].attributes.uid[1] == "user02", "result 2 uid attribute is not equal to user01")
         }
     }
 --- request
@@ -369,7 +370,7 @@ GET /t
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "dc=example,dc=org", "result entryDN is not equal to dc=example,dc=org")
+            assert(res[1].entry_dn == "dc=example,dc=org", "result entry_dn is not equal to dc=example,dc=org")
         }
     }
 --- request
@@ -401,8 +402,8 @@ GET /t
             end
 
             assert(#res == 2, "result length is not equal to 2")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result 1 entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
-            assert(res[2].entryDN == "cn=user02,ou=users,dc=example,dc=org", "result 2 entryDN is not equal to cn=user02,ou=users,dc=example,dc=org")
+            assert(res[1].entry_dn == "cn=user01,ou=users,dc=example,dc=org", "result 1 entry_dn is not equal to cn=user01,ou=users,dc=example,dc=org")
+            assert(res[2].entry_dn == "cn=user02,ou=users,dc=example,dc=org", "result 2 entry_dn is not equal to cn=user02,ou=users,dc=example,dc=org")
         }
     }
 --- request
@@ -434,8 +435,8 @@ GET /t
             end
 
             assert(#res == 2, "result length is not equal to 2")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result 1 entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
-            assert(res[2].entryDN == "cn=user02,ou=users,dc=example,dc=org", "result 2 entryDN is not equal to cn=user02,ou=users,dc=example,dc=org")
+            assert(res[1].entry_dn == "cn=user01,ou=users,dc=example,dc=org", "result 1 entry_dn is not equal to cn=user01,ou=users,dc=example,dc=org")
+            assert(res[2].entry_dn == "cn=user02,ou=users,dc=example,dc=org", "result 2 entry_dn is not equal to cn=user02,ou=users,dc=example,dc=org")
         }
     }
 --- request
@@ -467,7 +468,7 @@ GET /t
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "cn=user02,ou=users,dc=example,dc=org", "result entryDN is not equal to cn=user02,ou=users,dc=example,dc=org")
+            assert(res[1].entry_dn == "cn=user02,ou=users,dc=example,dc=org", "result entry_dn is not equal to cn=user02,ou=users,dc=example,dc=org")
         }
     }
 --- request
@@ -499,7 +500,7 @@ GET /t
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
+            assert(res[1].entry_dn == "cn=user01,ou=users,dc=example,dc=org", "result entry_dn is not equal to cn=user01,ou=users,dc=example,dc=org")
         }
     }
 --- request
@@ -562,8 +563,8 @@ GET /t
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
-            assert(res[1].attributes.gidNumber == "1000", "result gidNumber attribute is not equal to 1000")
+            assert(res[1].entry_dn == "cn=user01,ou=users,dc=example,dc=org", "result entry_dn is not equal to cn=user01,ou=users,dc=example,dc=org")
+            assert(res[1].attributes.gidNumber[1] == "1000", "result gidNumber attribute is not equal to 1000")
         }
     }
 --- request
@@ -636,8 +637,8 @@ GET /t
             end
 
             assert(#res == 1, "result length is not equal to 1")
-            assert(res[1].entryDN == "cn=user01,ou=users,dc=example,dc=org", "result entryDN is not equal to cn=user01,ou=users,dc=example,dc=org")
-            assert(res[1].attributes.gidNumber == "1000", "result gidNumber attribute is not equal to 1000")
+            assert(res[1].entry_dn == "cn=user01,ou=users,dc=example,dc=org", "result entry_dn is not equal to cn=user01,ou=users,dc=example,dc=org")
+            assert(res[1].attributes.gidNumber[1] == "1000", "result gidNumber attribute is not equal to 1000")
         }
     }
 --- request

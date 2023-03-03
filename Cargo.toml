@@ -1,0 +1,17 @@
+[package]
+name = "lua-resty-ldap"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rasn"
+crate-type = ["cdylib"]
+
+[dependencies]
+mlua = { version = "0.8.6", features = ["module", "send", "luajit"] }
+rasn = "0.6.1"
+rasn-ldap = "0.6.0"
+bytes = "1.4.0"
+
+[profile.release]
+strip = true
