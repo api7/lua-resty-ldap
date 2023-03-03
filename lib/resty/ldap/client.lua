@@ -1,6 +1,5 @@
 local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
-local asn1     = require("resty.ldap.asn1")
 local to_hex   = require("resty.string").to_hex
 local rasn     = require("rasn")
 
@@ -13,8 +12,6 @@ local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local string_char  = string.char
 local rasn_decode  = rasn.decode_ldap
-
-local asn1_parse_ldap_result = asn1.parse_ldap_result
 
 
 local _M = {}
@@ -58,16 +55,22 @@ local function _start_tls(sock, host, port)
         end
         return fmt("receive response header failed: %s", err)
     end
-    local _, packet_len = calculate_payload_length(len, 2, sock)
+    local _, packet_len, packet_header = calculate_payload_length(len, 2, sock)
 
     local packet, err = sock:receive(packet_len)
     if not packet then
         sock:close()
         return fmt("receive response failed: %s", err)
     end
-    local res, err = asn1_parse_ldap_result(packet)
-    if err then
-        return fmt("invalid ldap message encoding: %s, message: %s", err, to_hex(packet))
+
+    local packet = packet_header .. packet
+    local ok, res, err = pcall(rasn_decode, packet)
+    if not ok or err then
+        return nil, fmt(
+            "failed to decode ldap message: %s, message: %s",
+            not ok and res or err, -- error returned in second value by pcall
+            to_hex(packet)
+        )
     end
 
     if res.protocol_op ~= protocol.APP_NO.ExtendedResponse then
