@@ -2,7 +2,7 @@
 
 Access ldap server via cosocket.
 
-A small part of the code in this project came from [kong](https://github.com/Kong/kong/tree/master/kong/plugins/ldap-auth) and they are being replaced.
+A small part of the code in this project came from [kong](https://github.com/Kong/kong/tree/master/kong/plugins/ldap-auth) and most of them are being refactored.
 
 ## Installation
 
