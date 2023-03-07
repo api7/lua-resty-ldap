@@ -21,7 +21,7 @@ __DATA__
 --- config
     location /t {
         content_by_lua_block {
-            local ldap_client = require "resty.ldap.client"
+            local ldap_client = require("resty.ldap.client")
 
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:simple_bind()
@@ -44,7 +44,7 @@ GET /t
 --- config
     location /t {
         content_by_lua_block {
-            local ldap_client = require "resty.ldap.client"
+            local ldap_client = require("resty.ldap.client")
 
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
@@ -67,7 +67,7 @@ GET /t
 --- config
     location /t {
         content_by_lua_block {
-            local ldap_client = require "resty.ldap.client"
+            local ldap_client = require("resty.ldap.client")
 
             local client = ldap_client:new("127.0.0.1", 1389)
             local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "invalid_password")
@@ -80,7 +80,7 @@ GET /t
 --- request
 GET /t
 --- error_log
-Error: The supplied credential is invalid
+simple bind failed, error: The supplied credential is invalid
 --- error_code: 401
 
 
@@ -90,7 +90,7 @@ Error: The supplied credential is invalid
 --- config
     location /t {
         content_by_lua_block {
-            local ldap_client = require "resty.ldap.client"
+            local ldap_client = require("resty.ldap.client")
 
             local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true })
             local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
@@ -113,7 +113,7 @@ GET /t
 --- config
     location /t {
         content_by_lua_block {
-            local ldap_client = require "resty.ldap.client"
+            local ldap_client = require("resty.ldap.client")
 
             local client = ldap_client:new("127.0.0.1", 1389, { start_tls = true })
             local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
@@ -137,7 +137,7 @@ GET /t
     location /t {
         lua_ssl_trusted_certificate ../../certs/mycacert.crt;
         content_by_lua_block {
-            local ldap_client = require "resty.ldap.client"
+            local ldap_client = require("resty.ldap.client")
 
             local client = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = true })
             local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")

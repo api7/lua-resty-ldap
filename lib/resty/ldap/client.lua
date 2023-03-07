@@ -1,20 +1,18 @@
 local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
-local asn1     = require("resty.ldap.asn1")
 local to_hex   = require("resty.string").to_hex
-local rasn     = require("rasn")
+local ok, rasn = pcall(require, "rasn")
+
+if not ok then
+    error("failed to load rasn library: " .. rasn)
+end
 
 local tostring     = tostring
 local fmt          = string.format
-local log          = ngx.log
-local ERR          = ngx.ERR
-local DEBUG        = ngx.DEBUG
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local string_char  = string.char
 local rasn_decode  = rasn.decode_ldap
-
-local asn1_parse_ldap_result = asn1.parse_ldap_result
 
 
 local _M = {}
@@ -43,7 +41,7 @@ local function calculate_payload_length(encStr, pos, socket)
     return pos, elen, encStr
 end
 
-local function _start_tls(sock, host, port)
+local function _start_tls(sock)
     -- send STARTTLS request
     local bytes, err = sock:send(protocol.start_tls_request())
     if not bytes then
@@ -58,16 +56,22 @@ local function _start_tls(sock, host, port)
         end
         return fmt("receive response header failed: %s", err)
     end
-    local _, packet_len = calculate_payload_length(len, 2, sock)
+    local _, packet_len, packet_header = calculate_payload_length(len, 2, sock)
 
     local packet, err = sock:receive(packet_len)
     if not packet then
         sock:close()
         return fmt("receive response failed: %s", err)
     end
-    local res, err = asn1_parse_ldap_result(packet)
-    if err then
-        return fmt("invalid ldap message encoding: %s, message: %s", err, to_hex(packet))
+
+    local packet = packet_header .. packet
+    local ok, res, err = pcall(rasn_decode, packet)
+    if not ok or err then
+        return nil, fmt(
+            "failed to decode ldap message: %s, message: %s",
+            not ok and res or err, -- error returned in second value by pcall
+            to_hex(packet)
+        )
     end
 
     if res.protocol_op ~= protocol.APP_NO.ExtendedResponse then
@@ -79,7 +83,7 @@ local function _start_tls(sock, host, port)
         local error_msg = protocol.ERROR_MSG[res.result_code]
 
         return fmt("error: %s, details: %s",
-                    error_msg or "Unknown error occurred (code: " .. res.result_code .. ")",
+                    error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
                     res.diagnostic_msg or "")
     end
 end
@@ -120,7 +124,7 @@ local function _init_socket(self)
 
         if count == 0 then
             -- STARTTLS
-            local err = _start_tls(sock, host, port)
+            local err = _start_tls(sock)
             if err then
                 return fmt("launch STARTTLS connection on %s:%s failed: %s",
                             host, tostring(port), err)
@@ -266,9 +270,10 @@ function _M.simple_bind(self, dn, password)
     if res.result_code ~= 0 then
         local error_msg = protocol.ERROR_MSG[res.result_code]
 
-        return false, fmt("\n  Error: %s\n  Details: %s",
-            error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
-            res.diagnostic_msg or "")
+
+        return false, fmt("simple bind failed, error: %s, details: %s",
+                    error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
+                    res.diagnostic_msg or "")
     end
 
     return true
