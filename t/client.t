@@ -80,7 +80,7 @@ GET /t
 --- request
 GET /t
 --- error_log
-Error: The supplied credential is invalid
+simple bind failed, error: The supplied credential is invalid
 --- error_code: 401
 
 
