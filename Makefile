@@ -1,5 +1,11 @@
+UNAME ?= $(shell uname)
 INSTALL ?= install
 ECHO ?= echo
+C_SO_NAME := librasn.so
+
+ifeq ($(UNAME),Darwin)
+	C_SO_NAME := librasn.dylib
+endif
 
 all:
 	@echo --- Build
@@ -26,7 +32,7 @@ install:
 	@echo INST_CONFDIR: $(INST_CONFDIR)
 	$(INSTALL) -d $(INST_LUADIR)/resty/ldap/
 	$(INSTALL) lib/resty/ldap/*.lua $(INST_LUADIR)/resty/ldap/
-	$(INSTALL) target/release/librasn.so $(INST_LIBDIR)/rasn.so
+	$(INSTALL) target/release/${C_SO_NAME} $(INST_LIBDIR)/rasn.so
 
 ### dev:          Create a development ENV
 .PHONY: dev
