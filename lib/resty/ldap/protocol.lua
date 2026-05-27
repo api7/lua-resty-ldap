@@ -13,6 +13,7 @@ _M.ERROR_MSG = {
     [1]  = "Initialization of LDAP library failed",
     [4]  = "Size limit exceeded",
     [13] = "Confidentiality required",
+    [14] = "SASL bind in progress",
     [32] = "No such object",
     [34] = "Invalid DN",
     [49] = "The supplied credential is invalid"
@@ -43,6 +44,19 @@ end
 function _M.start_tls_request()
     local methodName = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, "1.3.6.1.4.1.1466.20037")
     local ldapMsg = ldap_message(_M.APP_NO.ExtendedRequest, methodName)
+    return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
+end
+
+
+function _M.sasl_bind_request(mechanism, credentials)
+    local sasl_body = asn1_encode(mechanism)
+    if credentials and #credentials > 0 then
+        sasl_body = sasl_body .. asn1_encode(credentials)
+    end
+    -- [3] CONSTRUCTED = SaslCredentials SEQUENCE in AuthenticationChoice
+    local sasl_auth = asn1_put_object(3, asn1.CLASS.CONTEXT_SPECIFIC, 1, sasl_body)
+    local bindReq   = asn1_encode(3) .. asn1_encode("") .. sasl_auth
+    local ldapMsg   = ldap_message(_M.APP_NO.BindRequest, bindReq)
     return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 end
 

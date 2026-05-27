@@ -12,6 +12,7 @@ local fmt          = string.format
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local string_char  = string.char
+local rasn_gssapi_new = rasn.gssapi_new
 local rasn_decode  = rasn.decode_ldap
 
 
@@ -88,7 +89,7 @@ local function _start_tls(sock)
     end
 end
 
-local function _init_socket(self)
+local function _init_socket(self, pool_suffix)
     local host = self.host
     local port = self.port
     local socket_config = self.socket_config
@@ -96,10 +97,10 @@ local function _init_socket(self)
 
     sock:settimeout(socket_config.socket_timeout)
 
-    -- keep TLS connections in a separate pool to avoid reusing non-secure
-    -- connections and vice-versa, because STARTTLS use the same port
+    -- keep TLS and GSSAPI connections in separate pools to avoid reusing
+    -- connections with different security/auth properties
     local opts = {
-        pool = host .. ":" .. port .. (socket_config.start_tls and ":starttls" or ""),
+        pool = host .. ":" .. port .. (socket_config.start_tls and ":starttls" or "") .. (pool_suffix or ""),
         pool_size = socket_config.keepalive_pool_size,
     }
 
@@ -142,6 +143,38 @@ local function _init_socket(self)
 
     self.socket = sock
 end
+
+-- Send one request and receive one response on an already-open socket.
+-- Does not touch the connection pool — caller is responsible for keepalive.
+local function _bind_exchange(socket, request)
+    local bytes, err = socket:send(request)
+    if not bytes then
+        return nil, fmt("send request failed: %s", err)
+    end
+
+    local len, err = socket:receive(2)
+    if not len then
+        socket:close()
+        return nil, fmt("receive response header failed: %s", err)
+    end
+    local _, packet_len, packet_header = calculate_payload_length(len, 2, socket)
+
+    local packet, err = socket:receive(packet_len)
+    if not packet then
+        socket:close()
+        return nil, fmt("receive response failed: %s", err)
+    end
+
+    local ok, res, err = pcall(rasn_decode, packet_header .. packet)
+    if not ok or err then
+        return nil, fmt("failed to decode ldap message: %s, message: %s",
+            not ok and res or err,
+            to_hex(packet_header .. packet))
+    end
+
+    return res
+end
+
 
 local function _send_recieve(cli, request, multi_resp_hint)
     -- initialize socket
@@ -276,6 +309,131 @@ function _M.simple_bind(self, dn, password)
                     res.diagnostic_msg or "")
     end
 
+    return true
+end
+
+
+-- Authenticate using SASL/GSSAPI (Kerberos).
+-- service_name: GSSAPI host-based service name, e.g. "ldap@ldap.example.com"
+-- Uses a dedicated connection pool (":gssapi" suffix) so that authenticated
+-- connections are never mixed with unauthenticated ones.  Reused connections
+-- are assumed to already be authenticated and skip the handshake (Option B).
+function _M.gssapi_bind(self, service_name)
+    local err = _init_socket(self, ":gssapi")
+    if err then
+        return false, fmt("initialize socket failed: %s", err)
+    end
+
+    local sock = self.socket
+
+    local reused, err = sock:getreusedtimes()
+    if not reused then
+        return false, fmt("getreusedtimes failed: %s", err)
+    end
+
+    -- Reused connections are already authenticated; skip the handshake.
+    -- Return the connection to the pool so the subsequent search() reuses it.
+    if reused > 0 then
+        sock:setkeepalive(self.socket_config.keepalive_timeout)
+        return true
+    end
+
+    local ok, ctx = pcall(rasn_gssapi_new, service_name)
+    if not ok then
+        sock:close()
+        return false, fmt("GSSAPI context init failed: %s", ctx)
+    end
+
+    -- GSSAPI token exchange (RFC 4752 §3.1).
+    -- Loop until the GSSAPI context is established, sending/receiving tokens
+    -- via SASL BindRequest / saslBindInProgress (result code 14).
+    local server_token = nil
+    local gss_complete = false
+
+    while not gss_complete do
+        local step_ok, out_token, complete = pcall(ctx.step, ctx, server_token)
+        if not step_ok then
+            sock:close()
+            return false, fmt("GSSAPI step failed: %s", out_token)
+        end
+        gss_complete = complete
+
+        local res, err = _bind_exchange(sock, protocol.sasl_bind_request("GSSAPI", out_token))
+        if not res then
+            sock:close()
+            return false, fmt("GSSAPI bind exchange failed: %s", err)
+        end
+
+        if res.protocol_op ~= protocol.APP_NO.BindResponse then
+            sock:close()
+            return false, fmt("received incorrect op in packet: %d, expected %d",
+                res.protocol_op, protocol.APP_NO.BindResponse)
+        end
+
+        if res.result_code == 0 then
+            -- Server completed without a security layer offer (atypical but valid).
+            sock:setkeepalive(self.socket_config.keepalive_timeout)
+            return true
+        elseif res.result_code == 14 then
+            server_token = res.server_sasl_creds
+        else
+            sock:close()
+            local error_msg = protocol.ERROR_MSG[res.result_code]
+            return false, fmt("GSSAPI bind failed, error: %s, details: %s",
+                error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
+                res.diagnostic_msg or "")
+        end
+    end
+
+    -- Security layer negotiation (RFC 4752 §3.1).
+    -- server_token is now the GSSAPI-wrapped 4-byte offer:
+    --   byte 0:   bitmask of supported QOP (1=none, 2=integrity, 4=confidentiality)
+    --   bytes 1-3: server's maximum message size (big-endian)
+    if not (server_token and #server_token > 0) then
+        sock:close()
+        return false, "GSSAPI: server did not send security layer offer"
+    end
+
+    local unwrap_ok, offer = pcall(ctx.unwrap, ctx, server_token)
+    if not unwrap_ok then
+        sock:close()
+        return false, fmt("GSSAPI unwrap failed: %s", offer)
+    end
+
+    if type(offer) ~= "string" or #offer < 4 then
+        sock:close()
+        return false, "GSSAPI: server security layer offer must be at least 4 bytes"
+    end
+
+    -- RFC 4752 §3.1: bit 0 of the first byte signals "no security layer" support.
+    if string.byte(offer, 1) % 2 == 0 then
+        sock:close()
+        return false, "GSSAPI: server does not support no-security-layer (QoP bit 0 not set)"
+    end
+
+    -- Respond with SSF=0: no per-message security layer (we rely on TLS).
+    -- byte 0 = 0x01 (no security layer), bytes 1-3 = 0x000000 (max buf size 0)
+    local wrap_ok, wrapped = pcall(ctx.wrap, ctx, string_char(1, 0, 0, 0))
+    if not wrap_ok then
+        sock:close()
+        return false, fmt("GSSAPI wrap failed: %s", wrapped)
+    end
+
+    local res, err = _bind_exchange(sock, protocol.sasl_bind_request("GSSAPI", wrapped))
+    if not res then
+        sock:close()
+        return false, fmt("GSSAPI SSF exchange failed: %s", err)
+    end
+
+    if res.result_code ~= 0 then
+        sock:close()
+        local error_msg = protocol.ERROR_MSG[res.result_code]
+        return false, fmt("GSSAPI SSF negotiation failed, error: %s, details: %s",
+            error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
+            res.diagnostic_msg or "")
+    end
+
+    sock:setkeepalive(self.socket_config.keepalive_timeout)
     return true
 end
 

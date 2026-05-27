@@ -8,6 +8,7 @@ name = "rasn"
 crate-type = ["cdylib"]
 
 [dependencies]
+libgssapi = "0.9.1"
 mlua = { version = "0.8.6", features = ["module", "send", "luajit"] }
 rasn = "0.6.1"
 rasn-ldap = "0.6.0"
