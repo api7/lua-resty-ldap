@@ -1,9 +1,8 @@
 local lpeg = require("lpeg")
 local P, R, S, V = lpeg.P, lpeg.R, lpeg.S, lpeg.V
-local C, Ct, Cmt, Cg, Cp, Cc, Cf = lpeg.C, lpeg.Ct, lpeg.Cmt, lpeg.Cg, lpeg.Cp, lpeg.Cc, lpeg.Cf
+local C, Ct, Cg, Cp, Cc, Cf = lpeg.C, lpeg.Ct, lpeg.Cg, lpeg.Cp, lpeg.Cc, lpeg.Cf
 
 local string_char  = string.char
-local string_sub   = string.sub
 local table_insert = table.insert
 local table_concat = table.concat
 
@@ -162,30 +161,9 @@ local filter = P{
 
     UTF8_CONT = R'\128\191', -- continuation byte
     UTF8_FILTERED_CHARACTER =
-        -- Handle some cases where exclusion symbols are not need.
-        -- If attribute and value contain struck-out characters, but they are not part of any
-        -- operator, capture and skip it without enabling subsequent HEX-based matches
-        -- (since these characters are part of value, but HEX matches will unconditionally
-        -- strike them out)
-        Cmt(R('\0\127'), function(s, i, prev) -- match all ASCII character
-            -- Make sure that this character is not the last character, only then it is
-            -- possible to compose the operator.
-            if #s <= i + 1 then 
-                return false
-            end
-
-            -- Ensures that the value is parsed properly if there is a separate ~ symbol in the value.
-            if string_sub(s, i, i) == '~' and string_sub(s, i + 1, i + 1) ~= "=" then
-                -- Captures and skips that ~ symbol. The previous capture element needs to be 
-                -- added back manually.
-                return i + 1, prev .. '~'
-            end
-
-            return false -- No capture by default
-        end)
-        + R("\0\39", "\43\59", "\63\125", "\127\127") / "%0" -- 1-byte character, remove (, ), <, >, *, =, ~
-        + R("\194\223") * V'UTF8_CONT' / "%0" -- 2-byte character
-        + R("\224\239") * V'UTF8_CONT' * V'UTF8_CONT' / "%0" -- 3-byte character
+        R("\0\39", "\43\59", "\63\125", "\127\127") / "%0" -- 1-byte character, remove (, ), *, =, <, >, ~
+        + R("\194\223") * V'UTF8_CONT' / "%0"                                 -- 2-byte character
+        + R("\224\239") * V'UTF8_CONT' * V'UTF8_CONT' / "%0"                 -- 3-byte character
         + R("\240\244") * V'UTF8_CONT' * V'UTF8_CONT' * V'UTF8_CONT' / "%0", -- 4-byte character
 }
 
