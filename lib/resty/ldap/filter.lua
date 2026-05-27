@@ -108,7 +108,7 @@ local filter = P{
     ATTRIBUTE_DESCRIPTION = V'RAW_VALUE' / function(value)
         return { attribute_description = value }
     end,
-    ATTRIBUTE_VALUE = V'RAW_VALUE' / function(value)
+    ATTRIBUTE_VALUE = V'ASSERTION_VALUE' / function(value)
         return { attribute_value = value }
     end,
     ATTRIBUTE_VALUE_SUBSTRING = (
@@ -135,6 +135,15 @@ local filter = P{
     end,
 
     RAW_VALUE = list(V'ESCAPED_CHARACTER' + V'UTF8_FILTERED_CHARACTER') / table_concat, -- UTF8 sequence
+    -- RFC 4515 UTF1SUBSET (%x01-27 / %x2B-5B / %x5D-7F) plus multi-byte UTF-8.
+    -- Unlike RAW_VALUE, this permits =, <, >, ~ in assertion values, as the RFC allows.
+    ASSERTION_VALUE = list(
+        V'ESCAPED_CHARACTER'
+        + R("\1\39", "\43\91", "\93\127") / "%0"                              -- 1-byte UTF1SUBSET
+        + R("\194\223") * V'UTF8_CONT' / "%0"                                 -- 2-byte UTF-8
+        + R("\224\239") * V'UTF8_CONT' * V'UTF8_CONT' / "%0"                 -- 3-byte UTF-8
+        + R("\240\244") * V'UTF8_CONT' * V'UTF8_CONT' * V'UTF8_CONT' / "%0"  -- 4-byte UTF-8
+    ) / table_concat,
     DIGIT = R'09',
     WILDCARD = P'*' / function()
         return { attribute_value = "*" }
