@@ -430,7 +430,7 @@ removing the extensible match implementation from it.
                 local result, err = filter.compile(case.filter)
                 if not result then
                     if case.expect_err then
-                        assert(case.expect_err == err, 
+                        assert(case.expect_err == err,
                                 'case#' .. i .. ' error content does not match expectations, expect: '
                                 .. case.expect_err .. ', actual: ' .. err)
                     else
@@ -495,7 +495,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 7: escape covers < and > which the grammar rejects raw
+=== TEST 7: escape covers < and >
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -520,7 +520,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 8: escape covers ~, which RFC 4515 allows but the grammar rejects at the edges
+=== TEST 8: escape covers ~, including at the edges of a value
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -528,9 +528,7 @@ ok
             local filter = require("resty.ldap.filter")
             assert(filter.escape("a~b") == "a\\7eb", "tilde")
             -- RFC 4515 UTF1SUBSET (%x5D-7F) includes ~ (0x7e), so these are all
-            -- legal assertion values. The grammar only tolerates a raw ~ mid-value
-            -- and only away from the end of the filter string, so escaping is what
-            -- makes the leading and trailing forms usable.
+            -- legal assertion values; escaped, they must round-trip unchanged.
             for _, raw in ipairs({ "admin~", "~admin", "ad~min", "admin~~", "~" }) do
                 local ast = assert(filter.compile("(cn=" .. filter.escape(raw) .. ")"),
                                    "value must compile after escaping: " .. raw)
@@ -551,3 +549,93 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+
+
+=== TEST 9: assertion values containing =, <, >, ~
+RFC 4515 UTF1SUBSET permits =, <, >, ~ inside assertion values even though
+they are used as filter operators at the outer level. The most common
+real-world case is a DN-valued attribute (e.g. member=uid=john,...).
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local filter = require("resty.ldap.filter")
+
+            local cases = {
+                {-- #1: DN assertion value with embedded '='
+                    filter = '(member=uid=john,dc=example,dc=com)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
+                        assert(f.attribute_description == 'member', m .. 'attribute_description != member, ' .. f.attribute_description)
+                        assert(f.attribute_value == 'uid=john,dc=example,dc=com', m .. 'attribute_value != uid=john,dc=example,dc=com, ' .. f.attribute_value)
+                    end),
+                },
+                {-- #2: assertion value with embedded '<'
+                    filter = '(cn=a<b)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
+                        assert(f.attribute_value == 'a<b', m .. 'attribute_value != a<b, ' .. f.attribute_value)
+                    end),
+                },
+                {-- #3: assertion value with embedded '>'
+                    filter = '(cn=a>b)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
+                        assert(f.attribute_value == 'a>b', m .. 'attribute_value != a>b, ' .. f.attribute_value)
+                    end),
+                },
+                {-- #4: assertion value with embedded '~'
+                    filter = '(mail=user~name@example.com)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
+                        assert(f.attribute_value == 'user~name@example.com', m .. 'attribute_value != user~name@example.com, ' .. f.attribute_value)
+                    end),
+                },
+                {-- #5: '=' and '<' inside substring components
+                    filter = '(cn=a=b*c<d*)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        local v = f.attribute_value
+                        assert(#v == 4 and v[1] == 'a=b' and v[2] == '*' and v[3] == 'c<d' and v[4] == '*',
+                               m .. 'substring components do not match')
+                    end),
+                },
+                {-- #6: '>' and '~' in middle and final substring components
+                    filter = '(cn=*a>b*c~d)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'substring', m .. 'item_type != substring, ' .. f.item_type)
+                        local v = f.attribute_value
+                        assert(#v == 4 and v[1] == '*' and v[2] == 'a>b' and v[3] == '*' and v[4] == 'c~d',
+                               m .. 'substring components do not match')
+                    end),
+                },
+                {-- #7: DN assertion value inside a compound filter
+                    filter = '(&(objectClass=groupOfNames)(member=cn=alice,ou=people,dc=example,dc=com))',
+                    test = (function(f, m)
+                        assert(f.op_type == 'and', m .. 'op_type != and, ' .. f.op_type)
+                        assert(f.items[2].attribute_description == 'member', m .. 'items[2].attribute_description != member, ' .. f.items[2].attribute_description)
+                        assert(f.items[2].attribute_value == 'cn=alice,ou=people,dc=example,dc=com', m .. 'items[2].attribute_value != cn=alice,ou=people,dc=example,dc=com, ' .. f.items[2].attribute_value)
+                    end),
+                },
+            }
+
+            for i, case in ipairs(cases) do
+                local result, err = filter.compile(case.filter)
+                if not result then
+                    assert(false, 'case#' .. i .. ' compile error: ' .. err)
+                end
+                case.test(result, 'case#' .. i .. ' error: ')
+            end
+
+            -- raw ( ) * stay special: they must be escaped inside a value
+            for _, f in ipairs({ '(cn=a(b)', '(cn=a*b(c)', '(member=uid=a(b),dc=x)' }) do
+                assert(not filter.compile(f), f .. ' must not compile')
+            end
+        }
+    }
+--- request
+GET /t
+--- no_error_log
+[error]
+--- error_code: 200
