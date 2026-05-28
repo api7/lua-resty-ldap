@@ -430,7 +430,7 @@ removing the extensible match implementation from it.
                 local result, err = filter.compile(case.filter)
                 if not result then
                     if case.expect_err then
-                        assert(case.expect_err == err, 
+                        assert(case.expect_err == err,
                                 'case#' .. i .. ' error content does not match expectations, expect: '
                                 .. case.expect_err .. ', actual: ' .. err)
                     else
@@ -441,6 +441,73 @@ removing the extensible match implementation from it.
                 if case.test then
                     case.test(result, 'case#' .. i .. ' error: ')
                 end
+            end
+        }
+    }
+--- request
+GET /t
+--- no_error_log
+[error]
+--- error_code: 200
+
+
+
+=== TEST 5: assertion values containing =, <, >, ~
+RFC 4515 UTF1SUBSET permits =, <, >, ~ inside assertion values even though
+they are used as filter operators at the outer level. The most common
+real-world case is a DN-valued attribute (e.g. member=uid=john,...).
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local filter = require("resty.ldap.filter")
+
+            local cases = {
+                {-- #1: DN assertion value with embedded '='
+                    filter = '(member=uid=john,dc=example,dc=com)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
+                        assert(f.attribute_description == 'member', m .. 'attribute_description != member, ' .. f.attribute_description)
+                        assert(f.attribute_value == 'uid=john,dc=example,dc=com', m .. 'attribute_value != uid=john,dc=example,dc=com, ' .. f.attribute_value)
+                    end),
+                },
+                {-- #2: assertion value with embedded '<'
+                    filter = '(cn=a<b)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
+                        assert(f.attribute_value == 'a<b', m .. 'attribute_value != a<b, ' .. f.attribute_value)
+                    end),
+                },
+                {-- #3: assertion value with embedded '>'
+                    filter = '(cn=a>b)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
+                        assert(f.attribute_value == 'a>b', m .. 'attribute_value != a>b, ' .. f.attribute_value)
+                    end),
+                },
+                {-- #4: assertion value with embedded '~'
+                    filter = '(mail=user~name@example.com)',
+                    test = (function(f, m)
+                        assert(f.item_type == 'simple', m .. 'item_type != simple, ' .. f.item_type)
+                        assert(f.attribute_value == 'user~name@example.com', m .. 'attribute_value != user~name@example.com, ' .. f.attribute_value)
+                    end),
+                },
+                {-- #5: DN assertion value inside a compound filter
+                    filter = '(&(objectClass=groupOfNames)(member=cn=alice,ou=people,dc=example,dc=com))',
+                    test = (function(f, m)
+                        assert(f.op_type == 'and', m .. 'op_type != and, ' .. f.op_type)
+                        assert(f.items[2].attribute_description == 'member', m .. 'items[2].attribute_description != member, ' .. f.items[2].attribute_description)
+                        assert(f.items[2].attribute_value == 'cn=alice,ou=people,dc=example,dc=com', m .. 'items[2].attribute_value != cn=alice,ou=people,dc=example,dc=com, ' .. f.items[2].attribute_value)
+                    end),
+                },
+            }
+
+            for i, case in ipairs(cases) do
+                local result, err = filter.compile(case.filter)
+                if not result then
+                    assert(false, 'case#' .. i .. ' compile error: ' .. err)
+                end
+                case.test(result, 'case#' .. i .. ' error: ')
             end
         }
     }
