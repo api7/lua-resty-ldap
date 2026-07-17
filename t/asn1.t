@@ -162,3 +162,57 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 6: constructed OCTET STRING (0x24) is rejected (BER smuggling)
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local asn1 = require("resty.ldap.asn1")
+            local function h(s) return (s:gsub("%s+",""):gsub("%x%x", function(b) return string.char(tonumber(b,16)) end)) end
+
+            -- 24 07 04 02 41 42 04 01 43 : constructed OCTET STRING whose inner
+            -- TLVs must NOT be handed back as the value (RFC 4511 s5.1)
+            local _, v, err = asn1.decode(h("24 07 04 02 41 42 04 01 43"))
+            assert(v == nil, "constructed OCTET STRING yields no value")
+            assert(err ~= nil, "constructed OCTET STRING reports error")
+
+            -- primitive OCTET STRING still decodes normally
+            local _, v2 = asn1.decode(h("04 02 41 42"))
+            assert(v2 == "AB", "primitive OCTET STRING still works")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+=== TEST 7: put_object length header is not truncated at 0x00 length octets
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local asn1 = require("resty.ldap.asn1")
+            -- content lengths whose long-form length octets contain 0x00
+            -- (256 -> 82 01 00, 512 -> 82 02 00) must round-trip through
+            -- encode -> decode; a strlen-based header read truncated these.
+            for _, n in ipairs({0, 1, 255, 256, 512, 768}) do
+                local data = string.rep("A", n)
+                local enc = asn1.put_object(asn1.TAG.SEQUENCE, asn1.CLASS.UNIVERSAL, 1, data)
+                local obj = assert(asn1.get_object(enc), "n=" .. n .. " failed to parse")
+                assert(obj.len == n, "n=" .. n .. " decoded len " .. tostring(obj.len))
+                assert(#enc == obj.hl + n, "n=" .. n .. " total length mismatch")
+            end
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]

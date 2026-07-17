@@ -4,7 +4,6 @@ local asn1_put_object = asn1.put_object
 local asn1_encode     = asn1.encode
 local asn1_get_object = asn1.get_object
 local asn1_decode     = asn1.decode
-local string_char     = string.char
 local table_insert    = table.insert
 
 
@@ -53,13 +52,10 @@ end
 
 
 function _M.simple_bind_request(dn, password)
+    -- simple [0] OCTET STRING; a zero-length password (anonymous/unauthenticated
+    -- bind) now encodes correctly as `80 00` since asn1.put_object no longer
+    -- truncates the length octet.
     local ldapAuth = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, password or "")
-    if not password then
-        -- When password is nil, ASN1_put_object does not generate a zero length for it,
-        -- so we need to fill it in manually.
-        -- This is a compatibility measure for anonymous bind.
-        ldapAuth = ldapAuth .. string_char(0)
-    end
     local bindReq = asn1_encode(3) .. asn1_encode(dn or "") .. ldapAuth
     local ldapMsg = ldap_message(_M.APP_NO.BindRequest, bindReq)
     return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)

@@ -81,20 +81,25 @@ local TAG = {
 _M.TAG = TAG
 
 
+-- The TLV header is at most tag(1) + long-form-length(1 + up to 4) = 6 bytes.
+local hdrbuf = ffi_new("unsigned char[16]")
+
 local function asn1_put_object(tag, class, constructed, data, len)
     len = type(data) == "string" and #data or len or 0
     if len < 0 then
         return nil, "invalid object length"
     end
 
-    local outbuf = ffi_new("unsigned char[?]", len)
-    ucharpp[0] = outbuf
-
+    -- ASN1_put_object writes only the header and advances the pointer past it.
+    -- Read back exactly that many bytes: a strlen-based ffi_string(hdrbuf) would
+    -- truncate any length octet containing 0x00 (e.g. content length 256 -> 82 01 00).
+    ucharpp[0] = hdrbuf
     C.ASN1_put_object(ucharpp, constructed, len, tag, class)
+    local header = ffi_string(hdrbuf, ucharpp[0] - hdrbuf)
     if not data then
-        return ffi_string(outbuf)
+        return header
     end
-    return ffi_string(outbuf) .. data
+    return header .. data
 end
 
 _M.put_object = asn1_put_object
@@ -213,6 +218,12 @@ do
     -- OCTET STRING: slice raw content bytes directly. Binary/NUL-safe by
     -- construction (no strlen-based ffi_string, no d2i).
     decoder[TAG.OCTET_STRING] = function(der, _, obj)
+        -- RFC 4511 s5.1: OCTET STRING values are primitive-only. A constructed
+        -- OCTET STRING (0x24) is a classic BER-smuggling vector against auth
+        -- parsers; reject it rather than return its inner TLV bytes as a value.
+        if obj.cons then
+            return nil, "constructed OCTET STRING not allowed"
+        end
         return string_sub(der, obj.offset + 1, obj.offset + obj.len)
     end
 
