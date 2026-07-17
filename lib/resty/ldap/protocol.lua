@@ -2,7 +2,10 @@ local asn1            = require("resty.ldap.asn1")
 local filter_compiler = require("resty.ldap.filter")
 local asn1_put_object = asn1.put_object
 local asn1_encode     = asn1.encode
+local asn1_get_object = asn1.get_object
+local asn1_decode     = asn1.decode
 local string_char     = string.char
+local table_insert    = table.insert
 
 
 local _M = {}
@@ -25,6 +28,8 @@ _M.APP_NO = {
     SearchRequest = 3,
     SearchResultEntry = 4,
     SearchResultDone = 5,
+    ModifyResponse = 7,
+    SearchResultReference = 19,
     ExtendedRequest = 23,
     ExtendedResponse = 24
 }
@@ -182,6 +187,93 @@ function _M.search_request(base_obj, scope, deref_aliases, size_limit, time_limi
         time_limit .. types_only .. filter .. attributes_seq
     local ldapMsg = ldap_message(_M.APP_NO.SearchRequest, searchReq)
     return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
+end
+
+
+-- Response decoding. Replaces the Rust `rasn.decode_ldap` with pure Lua while
+-- reproducing its exact output shape so client.lua and the tests are unchanged.
+
+local function parse_ldap_result(packet, op, res)
+    local pos, code, matched_dn, diag, err
+    pos, code, err = asn1_decode(packet, op.offset)      -- resultCode ENUMERATED
+    if err then return nil, err end
+    res.result_code = code
+    pos, matched_dn, err = asn1_decode(packet, pos)      -- matchedDN OCTET STRING
+    if err then return nil, err end
+    res.matched_dn = matched_dn
+    _, diag, err = asn1_decode(packet, pos)              -- diagnosticMessage OCTET STRING
+    if err then return nil, err end
+    res.diagnostic_msg = diag
+    return res
+end
+
+local function parse_search_entry(packet, op, res)
+    local pos, entry_dn, err
+    pos, entry_dn, err = asn1_decode(packet, op.offset)  -- objectName
+    if err then return nil, err end
+    res.entry_dn = entry_dn
+
+    local attrs, aerr = asn1_get_object(packet, pos)     -- PartialAttributeList (SEQUENCE OF)
+    if not attrs then return nil, aerr end
+
+    local attributes = {}
+    local apos = attrs.offset
+    local astop = attrs.offset + attrs.len
+    while apos < astop do
+        local pa, perr = asn1_get_object(packet, apos)   -- PartialAttribute SEQUENCE
+        if not pa then return nil, perr end
+        local vpos, atype, terr = asn1_decode(packet, pa.offset)   -- type
+        if terr then return nil, terr end
+        local _, vals, verr = asn1_decode(packet, vpos)            -- vals SET OF -> array
+        if verr then return nil, verr end
+        attributes[atype] = vals or {}                   -- ALWAYS an array (empty for typesOnly)
+        apos = pa.offset + pa.len
+    end
+    res.attributes = attributes
+    return res
+end
+
+local function parse_search_reference(packet, op, res)
+    -- [APPLICATION 19] IMPLICIT replaces the SEQUENCE OF tag, so `op` IS the sequence.
+    local uris = {}
+    local pos = op.offset
+    local stop = op.offset + op.len
+    while pos < stop do
+        local uri, err
+        pos, uri, err = asn1_decode(packet, pos)
+        if err then return nil, err end
+        table_insert(uris, uri)
+    end
+    res.uris = uris
+    return res
+end
+
+function _M.decode_message(packet)
+    local env, err = asn1_get_object(packet, 0)
+    if not env then return nil, err end
+    if env.tag ~= asn1.TAG.SEQUENCE or env.class ~= asn1.CLASS.UNIVERSAL then
+        return nil, "invalid LDAPMessage envelope"
+    end
+
+    local pos, message_id, merr = asn1_decode(packet, env.offset)   -- messageID
+    if merr then return nil, merr end
+
+    local op, oerr = asn1_get_object(packet, pos)                   -- protocolOp
+    if not op then return nil, oerr end
+    if op.class ~= asn1.CLASS.APPLICATION then
+        return nil, "protocolOp is not APPLICATION-tagged"
+    end
+
+    local res = { message_id = message_id, protocol_op = op.tag }
+
+    if op.tag == _M.APP_NO.SearchResultEntry then
+        return parse_search_entry(packet, op, res)
+    elseif op.tag == _M.APP_NO.SearchResultReference then
+        return parse_search_reference(packet, op, res)
+    else
+        -- LDAPResult-shaped ops: BindResponse, SearchResultDone, ModifyResponse, ExtendedResponse
+        return parse_ldap_result(packet, op, res)
+    end
 end
 
 
