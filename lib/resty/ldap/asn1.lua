@@ -221,7 +221,7 @@ do
         cucharpp[0] = ffi_cast("const unsigned char *", der) + offset
         local typ = C.d2i_ASN1_INTEGER(nil, cucharpp, obj.hl + obj.len)
         if typ == nil then
-            return nil
+            return nil, "invalid INTEGER encoding"
         end
         local v = C.ASN1_INTEGER_get(typ)
         C.ASN1_INTEGER_free(typ)
@@ -232,7 +232,7 @@ do
         cucharpp[0] = ffi_cast("const unsigned char *", der) + offset
         local typ = C.d2i_ASN1_ENUMERATED(nil, cucharpp, obj.hl + obj.len)
         if typ == nil then
-            return nil
+            return nil, "invalid ENUMERATED encoding"
         end
         local v = C.ASN1_ENUMERATED_get(typ)
         C.ASN1_INTEGER_free(typ)   -- shares the ASN1_STRING struct; INTEGER_free is correct
@@ -247,7 +247,7 @@ do
             local value, err
             pos, value, err = decode(der, pos, depth + 1)
             if err then
-                return nil
+                return nil, err
             end
             table_insert(values, value)
         end
@@ -269,9 +269,12 @@ do
             return nil, nil, err
         end
         local d = decoder[obj.tag]
-        local value
+        local value, derr
         if d then
-            value = d(der, offset, obj, depth)
+            value, derr = d(der, offset, obj, depth)
+            if derr then
+                return nil, nil, derr
+            end
         end
         return obj.offset + obj.len, value
     end

@@ -128,3 +128,37 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 5: decoder errors surface, not swallowed as empty success
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local asn1 = require("resty.ldap.asn1")
+            local function h(s) return (s:gsub("%s+",""):gsub("%x%x", function(b) return string.char(tonumber(b,16)) end)) end
+
+            -- truncated child inside a SEQUENCE: outer len 3, inner OCTET
+            -- STRING claims 5 content bytes but only 1 present
+            local _, v, err = asn1.decode(h("30 03 04 05 41"))
+            assert(v == nil, "no value for truncated child")
+            assert(err ~= nil, "truncated child reports error")
+
+            -- zero-length INTEGER: d2i_ASN1_INTEGER returns nil
+            local _, v2, err2 = asn1.decode(h("02 00"))
+            assert(v2 == nil, "no value for zero-len INTEGER")
+            assert(err2 ~= nil, "zero-len INTEGER reports error")
+
+            -- zero-length ENUMERATED: d2i_ASN1_ENUMERATED returns nil
+            local _, v3, err3 = asn1.decode(h("0a 00"))
+            assert(v3 == nil, "no value for zero-len ENUMERATED")
+            assert(err3 ~= nil, "zero-len ENUMERATED reports error")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
