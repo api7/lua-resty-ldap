@@ -45,5 +45,7 @@ jobs:
         run: |
           sudo docker run --detach --rm --name openldap -p 1389:1389 -p 1636:1636 -v $PWD/t/certs:/opt/bitnami/openldap/certs -e LDAP_ENABLE_TLS=yes -e LDAP_TLS_CERT_FILE=/opt/bitnami/openldap/certs/localhost_slapd_cert.pem -e LDAP_TLS_KEY_FILE=/opt/bitnami/openldap/certs/localhost_slapd_key.pem -e LDAP_TLS_CA_FILE=/opt/bitnami/openldap/certs/mycacert.crt -e LDAP_ADMIN_USERNAME=admin -e LDAP_ADMIN_PASSWORD=adminpassword -e LDAP_USERS=user01,user02 -e LDAP_PASSWORDS=password1,password2 bitnami/openldap:2.6
           sleep 3
+          docker cp t/fixtures/ad.ldif openldap:/tmp/ad.ldif
+          docker exec openldap ldapadd -x -H ldap://127.0.0.1:1389 -D "cn=admin,dc=example,dc=org" -w adminpassword -f /tmp/ad.ldif
           export PATH=$OPENRESTY_PREFIX/nginx/sbin:$OPENRESTY_PREFIX/luajit/bin:$PATH
           make test

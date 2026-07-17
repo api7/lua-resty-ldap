@@ -369,7 +369,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 1, "result length is not equal to 1")
+            -- 2 entries: the base entry plus cn=Jane Doe from t/fixtures/ad.ldif
+            assert(#res == 2, "result length is not equal to 2")
             assert(res[1].entry_dn == "dc=example,dc=org", "result entry_dn is not equal to dc=example,dc=org")
         }
     }
@@ -531,7 +532,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 5, "result length is not equal to 5")
+            -- 6 entries: the 5 bootstrap entries plus cn=Jane Doe from t/fixtures/ad.ldif
+            assert(#res == 6, "result length is not equal to 6")
         }
     }
 --- request
