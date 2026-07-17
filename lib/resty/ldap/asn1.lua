@@ -2,11 +2,16 @@ local ffi          = require("ffi")
 local C            = ffi.C
 local ffi_new      = ffi.new
 local ffi_string   = ffi.string
+local ffi_cast     = ffi.cast
+local band         = require("bit").band
 local string_char  = string.char
+local string_sub   = string.sub
+local table_insert = table.insert
 local new_tab      = require("resty.core.base").new_tab
 
 local ucharpp      = ffi_new("unsigned char*[1]")
 local charpp       = ffi_new("char*[1]")
+local cucharpp     = ffi_new("const unsigned char*[1]")
 
 
 ffi.cdef [[
@@ -159,6 +164,119 @@ do
     end
 end
 _M.encode = encode
+
+
+local MAX_DECODE_DEPTH = 100
+
+local asn1_get_object
+do
+    local lenp   = ffi_new("long[1]")
+    local tagp   = ffi_new("int[1]")
+    local classp = ffi_new("int[1]")
+    local strpp  = ffi_new("const unsigned char*[1]")
+
+    function asn1_get_object(der, start, stop)
+        start = start or 0
+        stop = stop or #der
+        if stop <= start or stop > #der then
+            return nil, "invalid offset"
+        end
+
+        local s_der = ffi_cast("const unsigned char *", der)
+        strpp[0] = s_der + start
+
+        local ret = C.ASN1_get_object(strpp, lenp, tagp, classp, stop - start)
+        -- The 0x80 bit signals an encoding error (also set for the illegal
+        -- indefinite/too-long forms). Reject rather than trust the result.
+        if band(ret, 0x80) == 0x80 or band(ret, 0x01) == 0x01 then
+            return nil, "invalid BER: bad tag/length encoding"
+        end
+
+        local content_off = strpp[0] - s_der
+        return {
+            tag    = tagp[0],
+            class  = classp[0],
+            len    = tonumber(lenp[0]),
+            offset = content_off,           -- 0-indexed content start
+            hl     = content_off - start,   -- header length (fixes the hardcoded +2)
+            cons   = band(ret, 0x20) == 0x20,
+        }
+    end
+end
+_M.get_object = asn1_get_object
+
+
+local decode
+do
+    local decoder = new_tab(0, 5)
+
+    -- OCTET STRING: slice raw content bytes directly. Binary/NUL-safe by
+    -- construction (no strlen-based ffi_string, no d2i).
+    decoder[TAG.OCTET_STRING] = function(der, _, obj)
+        return string_sub(der, obj.offset + 1, obj.offset + obj.len)
+    end
+
+    -- INTEGER / ENUMERATED: d2i parses a full TLV, so `offset` is the TLV start.
+    decoder[TAG.INTEGER] = function(der, offset, obj)
+        cucharpp[0] = ffi_cast("const unsigned char *", der) + offset
+        local typ = C.d2i_ASN1_INTEGER(nil, cucharpp, obj.hl + obj.len)
+        if typ == nil then
+            return nil
+        end
+        local v = C.ASN1_INTEGER_get(typ)
+        C.ASN1_INTEGER_free(typ)
+        return tonumber(v)
+    end
+
+    decoder[TAG.ENUMERATED] = function(der, offset, obj)
+        cucharpp[0] = ffi_cast("const unsigned char *", der) + offset
+        local typ = C.d2i_ASN1_ENUMERATED(nil, cucharpp, obj.hl + obj.len)
+        if typ == nil then
+            return nil
+        end
+        local v = C.ASN1_ENUMERATED_get(typ)
+        C.ASN1_INTEGER_free(typ)   -- shares the ASN1_STRING struct; INTEGER_free is correct
+        return tonumber(v)
+    end
+
+    local function decode_children(der, _, obj, depth)
+        local stop = obj.offset + obj.len
+        local pos = obj.offset
+        local values = {}
+        while pos < stop do
+            local value, err
+            pos, value, err = decode(der, pos, depth + 1)
+            if err then
+                return nil
+            end
+            table_insert(values, value)
+        end
+        return values
+    end
+
+    decoder[TAG.SEQUENCE] = decode_children
+    decoder[TAG.SET]      = decode_children
+
+    -- offset is 0-indexed. Returns next_offset, value, err.
+    function decode(der, offset, depth)
+        offset = offset or 0
+        depth = depth or 0
+        if depth > MAX_DECODE_DEPTH then
+            return nil, nil, "max decode depth exceeded"
+        end
+        local obj, err = asn1_get_object(der, offset)
+        if not obj then
+            return nil, nil, err
+        end
+        local d = decoder[obj.tag]
+        local value
+        if d then
+            value = d(der, offset, obj, depth)
+        end
+        return obj.offset + obj.len, value
+    end
+end
+_M.decode = decode
 
 
 return _M
