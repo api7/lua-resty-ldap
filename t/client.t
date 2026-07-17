@@ -152,3 +152,27 @@ GET /t
 --- no_error_log
 [error]
 --- error_code: 200
+
+
+=== TEST 100: resty.ldap.ldap_authenticate binds a valid user
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap = require("resty.ldap")
+            local ok, err = ldap.ldap_authenticate("user01", "password1", {
+                ldap_host = "127.0.0.1",
+                ldap_port = 1389,
+                base_dn   = "ou=users,dc=example,dc=org",
+                attribute = "cn",
+            })
+            assert(ok, "authenticate failed: " .. tostring(err))
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
