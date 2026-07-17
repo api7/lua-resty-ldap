@@ -494,3 +494,28 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 102: escape covers < and > which the grammar rejects raw
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local filter = require("resty.ldap.filter")
+            assert(filter.escape("a<b") == "a\\3cb", "lt")
+            assert(filter.escape("a>b") == "a\\3eb", "gt")
+            -- round-trip: a value with < and > compiles to a simple equality
+            -- whose attribute_value is the exact raw input
+            local raw = "a<b>c"
+            local ast = assert(filter.compile("(cn=" .. filter.escape(raw) .. ")"),
+                               "value with </> must compile after escaping")
+            assert(ast.item_type == "simple" and ast.filter_type == "equal", "simple equality")
+            assert(ast.attribute_value == raw, "round-trips to raw: " .. tostring(ast.attribute_value))
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
