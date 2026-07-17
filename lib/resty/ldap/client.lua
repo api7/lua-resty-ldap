@@ -141,10 +141,13 @@ local function _init_socket(self)
 end
 
 local function _send_recieve(cli, request, multi_resp_hint)
-    -- initialize socket
-    local err = _init_socket(cli)
-    if err then
-        return nil, fmt("initialize socket failed: %s", err)
+    -- In a pinned session the socket is already checked out; otherwise check out
+    -- one for this single operation.
+    if not cli.pinned then
+        local err = _init_socket(cli)
+        if err then
+            return nil, fmt("initialize socket failed: %s", err)
+        end
     end
 
     local socket = cli.socket
@@ -218,8 +221,11 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
     end
 
-    -- put back into the connection pool
-    socket:setkeepalive(cli.socket_config.keepalive_timeout)
+    -- Only return the socket to the pool for single-shot ops; a pinned session
+    -- is released explicitly by the caller via set_keepalive()/close().
+    if not cli.pinned then
+        socket:setkeepalive(cli.socket_config.keepalive_timeout)
+    end
 
     return multi_resp_hint and result or result[1]
 end
@@ -252,6 +258,44 @@ function _M.new(_, host, port, client_config)
     }, mt)
 
     return cli
+end
+
+
+function _M.connect(self)
+    if self.pinned then
+        return true
+    end
+    local err = _init_socket(self)
+    if err then
+        return nil, err
+    end
+    self.pinned = true
+    return true
+end
+
+
+function _M.set_keepalive(self)
+    if not self.pinned then
+        return true
+    end
+    self.pinned = nil
+    local sock = self.socket
+    self.socket = nil
+    if not sock then
+        return true
+    end
+    return sock:setkeepalive(self.socket_config.keepalive_timeout)
+end
+
+
+function _M.close(self)
+    self.pinned = nil
+    local sock = self.socket
+    self.socket = nil
+    if not sock then
+        return true
+    end
+    return sock:close()
 end
 
 
