@@ -17,20 +17,13 @@ dependencies = {
 }
 
 build = {
-   type = "make",
-   build_variables = {
-      CFLAGS="$(CFLAGS)",
-      LIBFLAG="$(LIBFLAG)",
-      LUA_LIBDIR="$(LUA_LIBDIR)",
-      LUA_BINDIR="$(LUA_BINDIR)",
-      LUA_INCDIR="$(LUA_INCDIR)",
-      LUA="$(LUA)",
-   },
-   install_variables = {
-      INST_PREFIX="$(PREFIX)",
-      INST_BINDIR="$(BINDIR)",
-      INST_LIBDIR="$(LIBDIR)",
-      INST_LUADIR="$(LUADIR)",
-      INST_CONFDIR="$(CONFDIR)",
-   },
+   type = "builtin",
+   modules = {
+      ["resty.ldap"]          = "lib/resty/ldap.lua",
+      ["resty.ldap.ldap"]     = "lib/resty/ldap/ldap.lua",
+      ["resty.ldap.asn1"]     = "lib/resty/ldap/asn1.lua",
+      ["resty.ldap.filter"]   = "lib/resty/ldap/filter.lua",
+      ["resty.ldap.protocol"] = "lib/resty/ldap/protocol.lua",
+      ["resty.ldap.client"]   = "lib/resty/ldap/client.lua",
+   }
 }
