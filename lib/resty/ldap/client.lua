@@ -1,18 +1,18 @@
 local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
 local to_hex   = require("resty.string").to_hex
-local ok, rasn = pcall(require, "rasn")
-
-if not ok then
-    error("failed to load rasn library: " .. rasn)
-end
 
 local tostring     = tostring
 local fmt          = string.format
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local string_char  = string.char
-local rasn_decode  = rasn.decode_ldap
+local decode_ldap  = protocol.decode_message
+
+-- Upper bound on a single LDAP message body (bytes). A well-formed length such
+-- as 84 7f ff ff ff is legal BER but would force a multi-GiB allocation in the
+-- worker (reference §1.2 DoS bound). 16 MiB comfortably exceeds any real entry.
+local MAX_LDAP_MESSAGE_SIZE = 16 * 1024 * 1024
 
 
 local _M = {}
@@ -65,13 +65,10 @@ local function _start_tls(sock)
     end
 
     local packet = packet_header .. packet
-    local ok, res, err = pcall(rasn_decode, packet)
-    if not ok or err then
-        return nil, fmt(
-            "failed to decode ldap message: %s, message: %s",
-            not ok and res or err, -- error returned in second value by pcall
-            to_hex(packet)
-        )
+    local res, err = decode_ldap(packet)
+    if not res then
+        return fmt("failed to decode ldap message: %s, message: %s",
+                   err or "unknown", to_hex(packet))
     end
 
     if res.protocol_op ~= protocol.APP_NO.ExtendedResponse then
@@ -181,6 +178,11 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
         local _, packet_len, packet_header = calculate_payload_length(len, 2, socket)
 
+        if packet_len > MAX_LDAP_MESSAGE_SIZE then
+            socket:close()
+            return nil, fmt("ldap message too large: %d bytes", packet_len)
+        end
+
         -- Get the data of the specified length
         local packet, err = socket:receive(packet_len)
         if not packet then
@@ -192,13 +194,10 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
 
         local packet = packet_header .. packet
-        local ok, res, err = pcall(rasn_decode, packet)
-        if not ok or err then
-            return nil, fmt(
-                "failed to decode ldap message: %s, message: %s",
-                not ok and res or err, -- error returned in second value by pcall
-                to_hex(packet)
-            )
+        local res, err = decode_ldap(packet)
+        if not res then
+            return nil, fmt("failed to decode ldap message: %s, message: %s",
+                            err or "unknown", to_hex(packet))
         end
 
         table_insert(result, res)
