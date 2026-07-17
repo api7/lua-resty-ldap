@@ -449,3 +449,48 @@ GET /t
 --- no_error_log
 [error]
 --- error_code: 200
+
+=== TEST 100: escape escapes the five special octets
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local filter = require("resty.ldap.filter")
+            assert(filter.escape("a*b") == "a\\2ab", "star")
+            assert(filter.escape("a(b") == "a\\28b", "lparen")
+            assert(filter.escape("a)b") == "a\\29b", "rparen")
+            assert(filter.escape("a\\b") == "a\\5cb", "backslash")
+            assert(filter.escape("a\0b") == "a\\00b", "nul")
+            assert(filter.escape("plain") == "plain", "plain unchanged")
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+=== TEST 101: escaped user input cannot widen the filter (injection)
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local filter = require("resty.ldap.filter")
+            local raw = "*)(uid=*"
+            local esc = filter.escape(raw)
+            local ast = assert(filter.compile("(cn=" .. esc .. ")"))
+            assert(ast.item_type == "simple", "must be a simple item, got " .. tostring(ast.item_type))
+            assert(ast.filter_type == "equal", "must be equality")
+            -- the compiler un-escapes back to the exact raw bytes
+            assert(ast.attribute_value == raw, "value round-trips to raw: " .. tostring(ast.attribute_value))
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
