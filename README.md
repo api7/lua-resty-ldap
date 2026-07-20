@@ -84,3 +84,53 @@ To load this module:
 `filter` is an LDAP filter expression in string. Default is `(objectClass=*)`.
 
 `attributes` is an array table that contains one to more query fields that you need to have the LDAP server return. Default is `["objectClass"]`.
+
+#### connect
+
+**syntax:** *ok, err = client:connect()*
+
+Establishes and pins the underlying connection, so that subsequent operations on this client (for example a `simple_bind` followed by a `search`) run on that same connection instead of each drawing one from the connection pool. Release the connection with `set_keepalive` or `close` when done.
+
+#### set_keepalive
+
+**syntax:** *ok, err = client:set_keepalive()*
+
+Releases a pinned connection back into the connection pool. The client remains usable; subsequent operations draw pooled connections as before.
+
+#### close
+
+**syntax:** *ok, err = client:close()*
+
+Closes a pinned connection without returning it to the pool.
+
+### resty.ldap
+
+Compatibility entrypoint kept for APISIX's `ldap-auth` plugin (restored from v0.1.0). New code should use `resty.ldap.client` instead.
+
+```lua
+    local ldap = require "resty.ldap"
+```
+
+#### ldap_authenticate
+
+**syntax:** *ok, err = ldap.ldap_authenticate(username, password, conf)*
+
+Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds; otherwise `ok` is `false` or `nil` and `err` carries the error.
+
+`conf` is a table of below items (note the key names differ from `resty.ldap.client`'s `client_config`; they follow the v0.1.0 / `ldap-auth` contract):
+
+| key      | type | default value      | Description |
+| ----------- | ----------- | ----------- | ----------- |
+| `ldap_host`           | string       | localhost  | LDAP server host. |
+| `ldap_port`           | number       | 389        | LDAP server port. |
+| `timeout`             | number       | 10000      | Socket timeout in milliseconds. |
+| `keepalive`           | number       | 60000      | Connection pool keepalive in milliseconds. |
+| `start_tls`           | boolean      | false      | Issue the StartTLS extended operation before binding. |
+| `ldaps`               | boolean      | false      | Connect using LDAP over TLS. |
+| `verify_ldap_host`    | boolean      | false      | Verify the server certificate during the TLS handshake. |
+| `base_dn`             | string       | ou=users,dc=example,dc=org | Base DN the username is appended to. |
+| `attribute`           | string       | cn         | RDN attribute the username is bound as. |
+
+### resty.ldap.ldap
+
+Low-level compatibility module used by `resty.ldap` (restored from v0.1.0): `bind_request`, `unbind_request` and `start_tls` over a caller-supplied cosocket. New code should use `resty.ldap.client` instead.
