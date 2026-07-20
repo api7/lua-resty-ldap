@@ -154,7 +154,7 @@ GET /t
 --- error_code: 200
 
 
-=== TEST 100: resty.ldap.ldap_authenticate binds a valid user
+=== TEST 7: resty.ldap.ldap_authenticate binds a valid user
 --- http_config eval: $::HttpConfig
 --- config
     location /t {

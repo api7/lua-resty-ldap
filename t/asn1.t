@@ -63,7 +63,7 @@ ok
             local function h(s) return (s:gsub("%s+",""):gsub("%x%x", function(b) return string.char(tonumber(b,16)) end)) end
             -- 04 05 41 42 00 43 44  => "AB\0CD" (5 bytes, embedded NUL)
             local _, v = asn1.decode(h("04 05 41 42 00 43 44"))
-            assert(#v == 5, "length " .. #v)               -- would be 2 under the old strlen bug
+            assert(#v == 5, "length " .. #v)               -- a strlen-based read would stop at the NUL
             assert(v == "AB\0CD", "value")
             ngx.say("ok")
         }
@@ -199,7 +199,7 @@ ok
             local asn1 = require("resty.ldap.asn1")
             -- content lengths whose long-form length octets contain 0x00
             -- (256 -> 82 01 00, 512 -> 82 02 00) must round-trip through
-            -- encode -> decode; a strlen-based header read truncated these.
+            -- encode -> decode; a strlen-based header read would truncate these.
             for _, n in ipairs({0, 1, 255, 256, 512, 768}) do
                 local data = string.rep("A", n)
                 local enc = asn1.put_object(asn1.TAG.SEQUENCE, asn1.CLASS.UNIVERSAL, 1, data)

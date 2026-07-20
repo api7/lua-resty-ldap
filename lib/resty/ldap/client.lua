@@ -11,7 +11,7 @@ local decode_ldap  = protocol.decode_message
 
 -- Upper bound on a single LDAP message body (bytes). A well-formed length such
 -- as 84 7f ff ff ff is legal BER but would force a multi-GiB allocation in the
--- worker (reference §1.2 DoS bound). 16 MiB comfortably exceeds any real entry.
+-- worker. 16 MiB comfortably exceeds any real entry.
 local MAX_LDAP_MESSAGE_SIZE = 16 * 1024 * 1024
 
 

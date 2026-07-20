@@ -81,7 +81,8 @@ local TAG = {
 _M.TAG = TAG
 
 
--- The TLV header is at most tag(1) + long-form-length(1 + up to 4) = 6 bytes.
+-- ASN1_put_object takes an int length, so it emits at most
+-- tag(1) + long-form-length(1 + 4) = 6 header bytes.
 local hdrbuf = ffi_new("unsigned char[16]")
 
 local function asn1_put_object(tag, class, constructed, data, len)
@@ -203,7 +204,7 @@ do
             class  = classp[0],
             len    = tonumber(lenp[0]),
             offset = content_off,           -- 0-indexed content start
-            hl     = content_off - start,   -- header length (fixes the hardcoded +2)
+            hl     = content_off - start,   -- header length (tag + length octets)
             cons   = band(ret, 0x20) == 0x20,
         }
     end

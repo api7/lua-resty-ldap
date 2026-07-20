@@ -186,8 +186,7 @@ function _M.search_request(base_obj, scope, deref_aliases, size_limit, time_limi
 end
 
 
--- Response decoding. Replaces the Rust `rasn.decode_ldap` with pure Lua while
--- reproducing its exact output shape so client.lua and the tests are unchanged.
+-- Response decoding.
 
 local function parse_ldap_result(packet, op, res)
     local pos, code, matched_dn, diag, err

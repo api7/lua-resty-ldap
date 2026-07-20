@@ -450,7 +450,7 @@ GET /t
 [error]
 --- error_code: 200
 
-=== TEST 100: escape escapes the five special octets
+=== TEST 5: escape escapes the five special octets
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -472,7 +472,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 101: escaped user input cannot widen the filter (injection)
+=== TEST 6: escaped user input cannot widen the filter (injection)
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -495,7 +495,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 102: escape covers < and > which the grammar rejects raw
+=== TEST 7: escape covers < and > which the grammar rejects raw
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
