@@ -1,6 +1,5 @@
 local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
-local to_hex   = require("resty.string").to_hex
 
 local tostring     = tostring
 local fmt          = string.format
@@ -18,19 +17,31 @@ local MAX_LDAP_MESSAGE_SIZE = 16 * 1024 * 1024
 local _M = {}
 local mt = { __index = _M }
 
+-- Returns the body length and the header bytes, or nil plus an error. Callers
+-- feed the length straight to socket:receive(), so it is validated here.
 local function calculate_payload_length(encStr, pos, socket)
     local elen
 
     pos, elen = bunpack(encStr, "C", pos)
+
+    -- 0x80 is the indefinite form and 0xff is reserved; RFC 4511 s5.1 requires
+    -- the definite form. Neither is a 128-byte short-form length.
+    if elen == 0x80 or elen == 0xff then
+        return nil, nil, "invalid BER length: indefinite or reserved form"
+    end
 
     if elen > 128 then
         elen = elen - 128
         local elenCalc = 0
         local elenNext
 
-        for i = 1, elen do
+        for _ = 1, elen do
             elenCalc = elenCalc * 256
-            encStr = encStr .. socket:receive(1)
+            local byte, err = socket:receive(1)
+            if not byte then
+                return nil, nil, fmt("receive length header failed: %s", err)
+            end
+            encStr = encStr .. byte
             pos, elenNext = bunpack(encStr, "C", pos)
             elenCalc = elenCalc + elenNext
         end
@@ -38,7 +49,11 @@ local function calculate_payload_length(encStr, pos, socket)
         elen = elenCalc
     end
 
-    return pos, elen, encStr
+    if elen > MAX_LDAP_MESSAGE_SIZE then
+        return nil, nil, fmt("ldap message too large: %d bytes", elen)
+    end
+
+    return elen, encStr
 end
 
 local function _start_tls(sock)
@@ -56,7 +71,11 @@ local function _start_tls(sock)
         end
         return fmt("receive response header failed: %s", err)
     end
-    local _, packet_len, packet_header = calculate_payload_length(len, 2, sock)
+    local packet_len, packet_header, lerr = calculate_payload_length(len, 2, sock)
+    if not packet_len then
+        sock:close()
+        return lerr
+    end
 
     local packet, err = sock:receive(packet_len)
     if not packet then
@@ -67,8 +86,9 @@ local function _start_tls(sock)
     local packet = packet_header .. packet
     local res, err = decode_ldap(packet)
     if not res then
-        return fmt("failed to decode ldap message: %s, message: %s",
-                   err or "unknown", to_hex(packet))
+        -- the body can carry DNs and attribute values; keep it out of the error
+        return fmt("failed to decode ldap message: %s (%d bytes)",
+                   err or "unknown", #packet)
     end
 
     if res.protocol_op ~= protocol.APP_NO.ExtendedResponse then
@@ -130,6 +150,7 @@ local function _init_socket(self)
     end
 
     if socket_config.start_tls or socket_config.ldaps then
+        local _
         _, err = sock:sslhandshake(true, host, socket_config.ssl_verify)
         if err ~= nil then
             return fmt("do TLS handshake on %s:%s failed: %s",
@@ -138,6 +159,17 @@ local function _init_socket(self)
     end
 
     self.socket = sock
+end
+
+-- Drop the socket after an unrecoverable error. A pinned session must lose its
+-- pin too, or later calls keep reaching for the dead socket.
+local function _reset_socket(cli)
+    local sock = cli.socket
+    cli.socket = nil
+    cli.pinned = nil
+    if sock then
+        sock:close()
+    end
 end
 
 local function _send_recieve(cli, request, multi_resp_hint)
@@ -155,6 +187,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
     -- send req
     local bytes, err = cli.socket:send(request)
     if not bytes then
+        _reset_socket(cli)
         return nil, fmt("send request failed: %s", err)
     end
 
@@ -174,16 +207,16 @@ local function _send_recieve(cli, request, multi_resp_hint)
         local len, err = reader(2)
         if not len then
             if err == "timeout" then
-                socket:close()
+                _reset_socket(cli)
                 return nil, fmt("receive response failed: %s", err)
             end
             break -- read done, data has been taken to the end
         end
-        local _, packet_len, packet_header = calculate_payload_length(len, 2, socket)
 
-        if packet_len > MAX_LDAP_MESSAGE_SIZE then
-            socket:close()
-            return nil, fmt("ldap message too large: %d bytes", packet_len)
+        local packet_len, packet_header, lerr = calculate_payload_length(len, 2, socket)
+        if not packet_len then
+            _reset_socket(cli)
+            return nil, lerr
         end
 
         -- Get the data of the specified length
@@ -192,15 +225,17 @@ local function _send_recieve(cli, request, multi_resp_hint)
             -- When the packet header is read but the packet body cannot be read,
             -- this error is considered unacceptable and therefore an error is
             -- returned directly instead of processing the received data.
-            socket:close()
+            _reset_socket(cli)
             return nil, err
         end
 
         local packet = packet_header .. packet
         local res, err = decode_ldap(packet)
         if not res then
-            return nil, fmt("failed to decode ldap message: %s, message: %s",
-                            err or "unknown", to_hex(packet))
+            -- the body can carry DNs and attribute values; keep it out of the error
+            _reset_socket(cli)
+            return nil, fmt("failed to decode ldap message: %s (%d bytes)",
+                            err or "unknown", #packet)
         end
 
         table_insert(result, res)

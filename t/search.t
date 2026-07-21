@@ -115,7 +115,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 1, "result length is not equal to 1")
+            -- 2 entries: the image seeds ou=users and ou=groups below the base
+            assert(#res == 2, "result length is not equal to 2")
             assert(res[1].entry_dn == "ou=users,dc=example,dc=org", "result 1 entry_dn is not equal to ou=users,dc=example,dc=org")
         }
     }
@@ -532,8 +533,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            -- 6 entries: the 5 bootstrap entries plus cn=Jane Doe from t/fixtures/ad.ldif
-            assert(#res == 6, "result length is not equal to 6")
+            -- 7 entries: 6 bootstrapped by the image plus cn=Jane Doe from t/fixtures/ad.ldif
+            assert(#res == 7, "result length is not equal to 7")
         }
     }
 --- request

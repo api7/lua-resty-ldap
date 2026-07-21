@@ -188,41 +188,49 @@ end
 
 -- Response decoding.
 
+-- Every decode below passes the enclosing element's end offset, so a field that
+-- overruns its parent is rejected instead of swallowing the next field's bytes.
+
 local function parse_ldap_result(packet, op, res)
-    local pos, code, matched_dn, diag, err
-    pos, code, err = asn1_decode(packet, op.offset)      -- resultCode ENUMERATED
+    local stop = op.offset + op.len
+    local _, pos, code, matched_dn, diag, err
+    pos, code, err = asn1_decode(packet, op.offset, stop)   -- resultCode ENUMERATED
     if err then return nil, err end
     res.result_code = code
-    pos, matched_dn, err = asn1_decode(packet, pos)      -- matchedDN OCTET STRING
+    pos, matched_dn, err = asn1_decode(packet, pos, stop)   -- matchedDN OCTET STRING
     if err then return nil, err end
     res.matched_dn = matched_dn
-    _, diag, err = asn1_decode(packet, pos)              -- diagnosticMessage OCTET STRING
+    _, diag, err = asn1_decode(packet, pos, stop)           -- diagnosticMessage OCTET STRING
     if err then return nil, err end
     res.diagnostic_msg = diag
     return res
 end
 
 local function parse_search_entry(packet, op, res)
+    local stop = op.offset + op.len
     local pos, entry_dn, err
-    pos, entry_dn, err = asn1_decode(packet, op.offset)  -- objectName
+    pos, entry_dn, err = asn1_decode(packet, op.offset, stop)  -- objectName
     if err then return nil, err end
     res.entry_dn = entry_dn
 
-    local attrs, aerr = asn1_get_object(packet, pos)     -- PartialAttributeList (SEQUENCE OF)
+    -- PartialAttributeList (SEQUENCE OF)
+    local attrs, aerr = asn1_get_object(packet, pos, stop)
     if not attrs then return nil, aerr end
 
     local attributes = {}
     local apos = attrs.offset
     local astop = attrs.offset + attrs.len
     while apos < astop do
-        local pa, perr = asn1_get_object(packet, apos)   -- PartialAttribute SEQUENCE
+        -- PartialAttribute SEQUENCE
+        local pa, perr = asn1_get_object(packet, apos, astop)
         if not pa then return nil, perr end
-        local vpos, atype, terr = asn1_decode(packet, pa.offset)   -- type
+        local pastop = pa.offset + pa.len
+        local vpos, atype, terr = asn1_decode(packet, pa.offset, pastop)  -- type
         if terr then return nil, terr end
-        local _, vals, verr = asn1_decode(packet, vpos)            -- vals SET OF -> array
+        local _, vals, verr = asn1_decode(packet, vpos, pastop)           -- vals SET OF -> array
         if verr then return nil, verr end
         attributes[atype] = vals or {}                   -- ALWAYS an array (empty for typesOnly)
-        apos = pa.offset + pa.len
+        apos = pastop
     end
     res.attributes = attributes
     return res
@@ -235,7 +243,7 @@ local function parse_search_reference(packet, op, res)
     local stop = op.offset + op.len
     while pos < stop do
         local uri, err
-        pos, uri, err = asn1_decode(packet, pos)
+        pos, uri, err = asn1_decode(packet, pos, stop)
         if err then return nil, err end
         table_insert(uris, uri)
     end
@@ -250,10 +258,11 @@ function _M.decode_message(packet)
         return nil, "invalid LDAPMessage envelope"
     end
 
-    local pos, message_id, merr = asn1_decode(packet, env.offset)   -- messageID
+    local envstop = env.offset + env.len
+    local pos, message_id, merr = asn1_decode(packet, env.offset, envstop)  -- messageID
     if merr then return nil, merr end
 
-    local op, oerr = asn1_get_object(packet, pos)                   -- protocolOp
+    local op, oerr = asn1_get_object(packet, pos, envstop)                  -- protocolOp
     if not op then return nil, oerr end
     if op.class ~= asn1.CLASS.APPLICATION then
         return nil, "protocolOp is not APPLICATION-tagged"

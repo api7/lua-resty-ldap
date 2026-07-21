@@ -91,6 +91,8 @@ To load this module:
 
 Establishes and pins the underlying connection, so that subsequent operations on this client (for example a `simple_bind` followed by a `search`) run on that same connection instead of each drawing one from the connection pool. Release the connection with `set_keepalive` or `close` when done.
 
+An unrecoverable socket error also releases the pin, so the next operation draws a fresh connection instead of reusing the dead one.
+
 #### set_keepalive
 
 **syntax:** *ok, err = client:set_keepalive()*
@@ -116,6 +118,8 @@ Compatibility entrypoint kept for APISIX's `ldap-auth` plugin (restored from v0.
 **syntax:** *ok, err = ldap.ldap_authenticate(username, password, conf)*
 
 Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds; otherwise `ok` is `false` or `nil` and `err` carries the error.
+
+`username` is RFC 4514-escaped before being placed in the DN, so DN metacharacters bind as literal characters instead of injecting extra RDN components.
 
 `conf` is a table of below items (note the key names differ from `resty.ldap.client`'s `client_config`; they follow the v0.1.0 / `ldap-auth` contract):
 

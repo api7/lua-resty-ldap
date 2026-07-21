@@ -167,3 +167,31 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 7: a field may not overrun the enclosing operation's boundary
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local protocol = require("resty.ldap.protocol")
+            local function h(s) return (s:gsub("%s+",""):gsub("%x%x", function(b) return string.char(tonumber(b,16)) end)) end
+
+            -- BindResponse declares 2 content bytes; its resultCode TLV is 4 and
+            -- runs into matchedDN, decoding as a "successful" result_code 256
+            local bad, err = protocol.decode_message(h("30 0d 02 01 01 61 02 0a 02 01 00 04 00 04 00"))
+            assert(bad == nil, "resultCode overrunning the op is rejected")
+            assert(err ~= nil, "resultCode overrunning the op reports an error")
+
+            -- ref declares 2 content bytes; the 10-byte URI TLV lies outside it
+            local bad2, err2 = protocol.decode_message(h("30 0f 02 01 02 73 02 04 08 6c 64 61 70 3a 2f 2f 78"))
+            assert(bad2 == nil and err2 ~= nil, "URI overrunning the op is rejected")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]

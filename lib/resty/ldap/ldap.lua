@@ -32,19 +32,36 @@ local APPNO = {
 }
 
 
+-- A legal length such as 84 7f ff ff ff would force a multi-GiB allocation in
+-- the worker. 16 MiB comfortably exceeds any real entry.
+local MAX_LDAP_MESSAGE_SIZE = 16 * 1024 * 1024
+
+
+-- Returns the body length and the header bytes, or nil plus an error. Both
+-- callers receive() the length while still in cleartext, so validate it here.
 local function calculate_payload_length(encStr, pos, socket)
     local elen
 
     pos, elen = bunpack(encStr, "C", pos)
+
+    -- 0x80 is the indefinite form and 0xff is reserved; RFC 4511 s5.1 requires
+    -- the definite form. Neither is a 128-byte short-form length.
+    if elen == 0x80 or elen == 0xff then
+        return nil, nil, "invalid BER length: indefinite or reserved form"
+    end
 
     if elen > 128 then
         elen = elen - 128
         local elenCalc = 0
         local elenNext
 
-        for i = 1, elen do
+        for _ = 1, elen do
             elenCalc = elenCalc * 256
-            encStr = encStr .. socket:receive(1)
+            local byte, err = socket:receive(1)
+            if not byte then
+                return nil, nil, fmt("receive length header failed: %s", err)
+            end
+            encStr = encStr .. byte
             pos, elenNext = bunpack(encStr, "C", pos)
             elenCalc = elenCalc + elenNext
         end
@@ -52,7 +69,11 @@ local function calculate_payload_length(encStr, pos, socket)
         elen = elenCalc
     end
 
-    return pos, elen, encStr
+    if elen > MAX_LDAP_MESSAGE_SIZE then
+        return nil, nil, fmt("ldap message too large: %d bytes", elen)
+    end
+
+    return elen, encStr
 end
 
 
@@ -62,7 +83,7 @@ function _M.bind_request(socket, username, password)
     local ldapMsg = asn1_encode(ldapMessageId) ..
                         asn1_put_object(APPNO.BindRequest, asn1.CLASS.APPLICATION, 1, bindReq)
 
-    local packet, packet_len, packet_header, _
+    local packet, packet_len, packet_header, lerr
 
     packet = asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 
@@ -72,7 +93,10 @@ function _M.bind_request(socket, username, password)
 
     packet = socket:receive(2)
 
-    _, packet_len, packet_header = calculate_payload_length(packet, 2, socket)
+    packet_len, packet_header, lerr = calculate_payload_length(packet, 2, socket)
+    if not packet_len then
+        return false, lerr
+    end
 
     packet = socket:receive(packet_len)
 
@@ -116,7 +140,7 @@ end
 
 
 function _M.start_tls(socket)
-    local ldapMsg, packet, packet_len, packet_header, _
+    local ldapMsg, packet, packet_len, packet_header, lerr
 
     local method_name = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, "1.3.6.1.4.1.1466.20037")
 
@@ -129,7 +153,10 @@ function _M.start_tls(socket)
     socket:send(packet)
     packet = socket:receive(2)
 
-    _, packet_len, packet_header = calculate_payload_length(packet, 2, socket)
+    packet_len, packet_header, lerr = calculate_payload_length(packet, 2, socket)
+    if not packet_len then
+        return false, lerr
+    end
 
     packet = socket:receive(packet_len)
 

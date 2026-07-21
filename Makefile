@@ -7,8 +7,7 @@ dev:
 .PHONY: test
 test:
 	git apply t/patch/unknown_op.patch
-	prove -r t/
-	git apply t/patch/unknown_op.patch -R
+	prove -r t/; ret=$$?; git apply t/patch/unknown_op.patch -R; exit $$ret
 
 ### help:         Show Makefile rules
 .PHONY: help

@@ -78,3 +78,78 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 3: close() unpins the session and the next op reconnects
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+            local protocol = require("resty.ldap.protocol")
+
+            local c = ldap_client:new("127.0.0.1", 1389)
+            assert(c:connect())
+            assert(c.pinned, "connect pins the session")
+            local pinned_sock = c.socket
+
+            assert(c:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
+            assert(rawequal(c.socket, pinned_sock), "socket changed mid-session")
+
+            assert(c:close())
+            assert(c.pinned == nil, "close unpins")
+            assert(c.socket == nil, "close drops the socket")
+
+            -- a later op checks out its own connection, still unpinned
+            local res, err = c:search("dc=example,dc=org",
+                protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
+            assert(res, "search after close: " .. tostring(err))
+            assert(#res == 1, "one entry")
+            assert(c.pinned == nil, "single-shot op stays unpinned")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+=== TEST 4: a hard socket error unpins the session instead of stranding it
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+            local protocol = require("resty.ldap.protocol")
+
+            local c = ldap_client:new("127.0.0.1", 1389)
+            assert(c:connect())
+
+            -- kill the pinned connection underneath the client
+            c.socket:close()
+
+            local ok, err = c:simple_bind("cn=admin,dc=example,dc=org", "adminpassword")
+            assert(not ok, "bind on a dead socket must fail")
+            assert(err ~= nil, "bind on a dead socket reports an error")
+
+            -- the failure must release the pin, not strand the client on it
+            assert(c.pinned == nil, "hard error left the session pinned")
+            assert(c.socket == nil, "hard error left a dead socket attached")
+
+            -- and the client is usable again without an explicit close()
+            local res, serr = c:search("dc=example,dc=org",
+                protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
+            assert(res, "client unusable after a hard error: " .. tostring(serr))
+            assert(#res == 1, "one entry")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- error_log
+attempt to send data on a closed socket

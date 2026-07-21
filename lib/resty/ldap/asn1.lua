@@ -257,7 +257,9 @@ do
         local values = {}
         while pos < stop do
             local value, err
-            pos, value, err = decode(der, pos, depth + 1)
+            -- bound to the parent's content, not the buffer: an overrunning
+            -- child would otherwise absorb a sibling's bytes without an error
+            pos, value, err = decode(der, pos, stop, depth + 1)
             if err then
                 return nil, err
             end
@@ -269,14 +271,15 @@ do
     decoder[TAG.SEQUENCE] = decode_children
     decoder[TAG.SET]      = decode_children
 
-    -- offset is 0-indexed. Returns next_offset, value, err.
-    function decode(der, offset, depth)
+    -- offset is 0-indexed; stop bounds the TLV to its parent, defaulting to the
+    -- whole buffer. Returns next_offset, value, err.
+    function decode(der, offset, stop, depth)
         offset = offset or 0
         depth = depth or 0
         if depth > MAX_DECODE_DEPTH then
             return nil, nil, "max decode depth exceeded"
         end
-        local obj, err = asn1_get_object(der, offset)
+        local obj, err = asn1_get_object(der, offset, stop)
         if not obj then
             return nil, nil, err
         end

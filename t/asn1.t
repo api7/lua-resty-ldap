@@ -216,3 +216,31 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 8: a child TLV may not overrun its parent's declared length
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local asn1 = require("resty.ldap.asn1")
+            local function h(s) return (s:gsub("%s+",""):gsub("%x%x", function(b) return string.char(tonumber(b,16)) end)) end
+
+            -- outer SEQUENCE declares 3 content bytes, inner OCTET STRING claims
+            -- 5, and the buffer is long enough to satisfy it
+            local _, v, err = asn1.decode(h("30 03 04 05 41 42 43 44 45"))
+            assert(v == nil, "no value when a child overruns its parent")
+            assert(err ~= nil, "parent overrun reports an error")
+
+            -- same bytes, correct outer length
+            local _, ok_v = asn1.decode(h("30 07 04 05 41 42 43 44 45"))
+            assert(type(ok_v) == "table" and ok_v[1] == "ABCDE", "well-formed still decodes")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
