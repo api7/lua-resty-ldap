@@ -82,11 +82,20 @@ function _M.ldap_authenticate(given_username, given_password, conf)
 
     local opts
 
-    -- keep TLS connections in a separate pool to avoid reusing non-secure
-    -- connections and vice-versa, because STARTTLS use the same port
+    -- Partition the pool by transport mode and verification policy:
+    -- sslhandshake() returns immediately on a reused connection, so a pooled
+    -- tls_verify=false connection must never serve one that demands verification.
+    local pool_suffix = ""
     if conf.start_tls then
+        pool_suffix = ":starttls"
+    elseif conf.ldaps then
+        pool_suffix = ":ldaps"
+    end
+    if pool_suffix ~= "" then
+        pool_suffix = pool_suffix ..
+            (resolve_tls_verify(conf) and ":verify" or ":noverify")
         opts = {
-            pool = conf.ldap_host .. ":" .. conf.ldap_port .. ":starttls"
+            pool = conf.ldap_host .. ":" .. conf.ldap_port .. pool_suffix
         }
     end
 
@@ -136,7 +145,8 @@ function _M.ldap_authenticate(given_username, given_password, conf)
                  tostring(conf.ldap_port), ": ", suppressed_err)
     end
 
-    return is_authenticated, err
+    -- who: the canonical escaped bind DN, for callers that key identity on it
+    return is_authenticated, err, who
 end
 
 

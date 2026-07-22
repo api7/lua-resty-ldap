@@ -176,3 +176,73 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+
+
+=== TEST 8: a pooled unverified TLS connection is never reused with verification on
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        lua_ssl_trusted_certificate ../../certs/mycacert.crt;
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+
+            -- pool a connection established without certificate verification
+            local a = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = false })
+            assert(a:connect())
+            assert(a.socket:getreusedtimes() == 0, "first connection must be fresh")
+            assert(a:set_keepalive())
+
+            -- ssl_verify=true must not reuse it (a fresh connection is required)
+            local b = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = true })
+            assert(b:connect())
+            assert(b.socket:getreusedtimes() == 0,
+                   "an unverified pooled connection must not serve ssl_verify=true")
+            assert(b:set_keepalive())
+
+            -- control: the same policy does reuse its own pooled connection
+            local c = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = false })
+            assert(c:connect())
+            assert(c.socket:getreusedtimes() > 0, "same-policy reuse should hit the pool")
+            assert(c:set_keepalive())
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+
+
+=== TEST 9: starttls pools are partitioned by verification policy too
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        lua_ssl_trusted_certificate ../../certs/mycacert.crt;
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+
+            local a = ldap_client:new("localhost", 1389, { start_tls = true, ssl_verify = false })
+            assert(a:connect())
+            assert(a.socket:getreusedtimes() == 0, "first connection must be fresh")
+            assert(a:set_keepalive())
+
+            local b = ldap_client:new("localhost", 1389, { start_tls = true, ssl_verify = true })
+            assert(b:connect())
+            assert(b.socket:getreusedtimes() == 0,
+                   "an unverified pooled STARTTLS connection must not serve ssl_verify=true")
+            assert(b:set_keepalive())
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]

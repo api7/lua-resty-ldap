@@ -38,8 +38,14 @@ jobs:
       - name: script
         run: |
           sudo docker run --detach --rm --name openldap -p 1389:1389 -p 1636:1636 -v $PWD/t/certs:/opt/bitnami/openldap/certs -e LDAP_ENABLE_TLS=yes -e LDAP_TLS_CERT_FILE=/opt/bitnami/openldap/certs/localhost_slapd_cert.pem -e LDAP_TLS_KEY_FILE=/opt/bitnami/openldap/certs/localhost_slapd_key.pem -e LDAP_TLS_CA_FILE=/opt/bitnami/openldap/certs/mycacert.crt -e LDAP_ADMIN_USERNAME=admin -e LDAP_ADMIN_PASSWORD=adminpassword -e LDAP_USERS=user01,user02 -e LDAP_PASSWORDS=password1,password2 bitnamilegacy/openldap:2.6.10-debian-12-r4
-          for _ in $(seq 1 30); do
-            docker exec openldap ldapsearch -x -H ldap://127.0.0.1:1389 -D "cn=admin,dc=example,dc=org" -w adminpassword -b "dc=example,dc=org" -s base >/dev/null 2>&1 && break
+          ok=0
+          for _ in $(seq 1 60); do
+            if docker exec openldap ldapsearch -x -H ldap://127.0.0.1:1389 -D "cn=admin,dc=example,dc=org" -w adminpassword -b "dc=example,dc=org" -s base >/dev/null 2>&1; then
+              ok=$((ok+1))
+              if [ "$ok" -ge 3 ]; then break; fi
+            else
+              ok=0
+            fi
             sleep 1
           done
           docker cp t/fixtures/ad.ldif openldap:/tmp/ad.ldif

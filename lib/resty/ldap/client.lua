@@ -84,12 +84,14 @@ local function _start_tls(sock)
     local packet = packet_header .. packet
     local res, err = decode_ldap(packet)
     if not res then
+        sock:close()
         -- the body can carry DNs and attribute values; keep it out of the error
         return fmt("failed to decode ldap message: %s (%d bytes)",
                    err or "unknown", #packet)
     end
 
     if res.protocol_op ~= protocol.APP_NO.ExtendedResponse then
+        sock:close()
         return fmt("received incorrect op in packet: %d, expected %d",
                     res.protocol_op, protocol.APP_NO.ExtendedResponse)
     end
@@ -97,6 +99,7 @@ local function _start_tls(sock)
     if res.result_code ~= 0 then
         local error_msg = protocol.ERROR_MSG[res.result_code]
 
+        sock:close()
         return fmt("error: %s, details: %s",
                     error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
                     res.diagnostic_msg or "")
@@ -111,16 +114,28 @@ local function _init_socket(self)
 
     sock:settimeout(socket_config.socket_timeout)
 
-    -- keep TLS connections in a separate pool to avoid reusing non-secure
-    -- connections and vice-versa, because STARTTLS use the same port
+    -- Partition the pool by transport mode and verification policy:
+    -- sslhandshake() returns immediately on a reused connection, so a pooled
+    -- ssl_verify=false connection must never serve one that demands verification.
+    local pool_suffix = ""
+    if socket_config.start_tls then
+        pool_suffix = ":starttls"
+    elseif socket_config.ldaps then
+        pool_suffix = ":ldaps"
+    end
+    if pool_suffix ~= "" then
+        pool_suffix = pool_suffix .. (socket_config.ssl_verify and ":verify" or ":noverify")
+    end
+
     local opts = {
-        pool = host .. ":" .. port .. (socket_config.start_tls and ":starttls" or ""),
+        pool = host .. ":" .. port .. pool_suffix,
         pool_size = socket_config.keepalive_pool_size,
     }
 
-    -- override the value when the user specifies connection pool name
+    -- override the value when the user specifies connection pool name,
+    -- still partitioned by policy
     if socket_config.keepalive_pool_name and socket_config.keepalive_pool_name ~= "" then
-        opts.pool = socket_config.keepalive_pool_name
+        opts.pool = socket_config.keepalive_pool_name .. pool_suffix
     end
 
     local ok, err = sock:connect(host, port, opts)
@@ -223,7 +238,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
             -- this error is considered unacceptable and therefore an error is
             -- returned directly instead of processing the received data.
             _reset_socket(cli)
-            return nil, err
+            return nil, fmt("receive response failed: %s", err)
         end
 
         local packet = packet_header .. packet

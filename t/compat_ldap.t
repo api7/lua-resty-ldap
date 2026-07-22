@@ -204,7 +204,7 @@ ok
             local ldap = require("resty.ldap")
             -- "al,ice" must reach the server as cn=al\,ice and fail as a clean
             -- credential error; sent raw, the server would refuse the DN itself
-            local ok, err = ldap.ldap_authenticate("al,ice", "password1", {
+            local ok, err, user_dn = ldap.ldap_authenticate("al,ice", "password1", {
                 ldap_host = "127.0.0.1",
                 ldap_port = 1389,
                 base_dn   = "ou=users,dc=example,dc=org",
@@ -213,6 +213,8 @@ ok
             assert(ok == false, "an unknown escaped username must fail cleanly")
             assert(err:find("credential", 1, true),
                    "expected a credential error: " .. tostring(err))
+            assert(user_dn == "cn=al\\,ice,ou=users,dc=example,dc=org",
+                   "expected the escaped bind DN, got: " .. tostring(user_dn))
             ngx.say("ok")
         }
     }
@@ -231,13 +233,15 @@ ok
     location /t {
         content_by_lua_block {
             local ldap = require("resty.ldap")
-            local ok, err = ldap.ldap_authenticate("user01", "password1", {
+            local ok, err, user_dn = ldap.ldap_authenticate("user01", "password1", {
                 ldap_host = "127.0.0.1",
                 ldap_port = 1389,
                 base_dn   = "ou=users,dc=example,dc=org",
                 attribute = "cn",
             })
             assert(ok, "authenticate failed: " .. tostring(err))
+            assert(user_dn == "cn=user01,ou=users,dc=example,dc=org",
+                   "expected the canonical bind DN, got: " .. tostring(user_dn))
             ngx.say("ok")
         }
     }
@@ -273,3 +277,45 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+
+
+=== TEST 10: a pooled unverified connection is never reused when tls_verify=true
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap = require("resty.ldap")
+
+            -- pool a connection established with verification disabled
+            local ok, err = ldap.ldap_authenticate("user01", "password1", {
+                ldap_host  = "localhost",
+                ldap_port  = 1636,
+                ldaps      = true,
+                tls_verify = false,
+                base_dn    = "ou=users,dc=example,dc=org",
+                attribute  = "cn",
+            })
+            assert(ok, "unverified handshake should bind: " .. tostring(err))
+
+            -- reusing the pooled connection would skip verification and bind;
+            -- a fresh connection must fail (no trusted certificate configured)
+            local ok2, err2 = ldap.ldap_authenticate("user01", "password1", {
+                ldap_host  = "localhost",
+                ldap_port  = 1636,
+                ldaps      = true,
+                tls_verify = true,
+                base_dn    = "ou=users,dc=example,dc=org",
+                attribute  = "cn",
+            })
+            assert(ok2 == false, "the unverified pooled connection must not be reused")
+            assert(err2:find("SSL handshake", 1, true), "unexpected err: " .. tostring(err2))
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- error_log
+lua tls certificate verify error

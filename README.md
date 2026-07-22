@@ -115,11 +115,13 @@ Compatibility entrypoint kept for APISIX's `ldap-auth` plugin (restored from v0.
 
 #### ldap_authenticate
 
-**syntax:** *ok, err = ldap.ldap_authenticate(username, password, conf)*
+**syntax:** *ok, err, user_dn = ldap.ldap_authenticate(username, password, conf)*
 
 Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds; otherwise `ok` is `false` or `nil` and `err` carries the error.
 
 `username` is escaped per RFC 4514 when the bind DN is built, so DN metacharacters (`, + " \ < > ; =`, a leading space or `#`, a trailing space, or a NUL) are treated as literal characters of the RDN value instead of injecting extra RDN components. Any username string is accepted, as in v0.1.0.
+
+`user_dn` is the canonical (escaped) DN the bind was performed with; callers that key identity on the DN (e.g. the APISIX `ldap-auth` consumer lookup) should use it instead of rebuilding the DN from the raw username. It is returned whenever a bind was attempted, and is `nil` on connect/STARTTLS/handshake failures.
 
 `conf` is a table of below items (note the key names differ from `resty.ldap.client`'s `client_config`; they follow the v0.1.0 / `ldap-auth` contract):
 
