@@ -5,7 +5,6 @@ local tostring     = tostring
 local fmt          = string.format
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
-local string_char  = string.char
 local decode_ldap  = protocol.decode_message
 
 -- Upper bound on a single LDAP message body (bytes). A well-formed length such
@@ -203,10 +202,6 @@ local function _send_recieve(cli, request, multi_resp_hint)
         return nil, fmt("send request failed: %s", err)
     end
 
-    -- Each response in a multi-response body has ASCII NULL(0x00) as its ending,
-    -- so here the reader is created using receiveuntil.
-    local reader = socket:receiveuntil(string_char(0x00))
-
     local result = {}
     -- When the client sends a search request, the server will return several
     -- different entries in a string-like concatenation, sto we must use a
@@ -216,7 +211,7 @@ local function _send_recieve(cli, request, multi_resp_hint)
         -- Takes the packet header of a single request body, which has a length
         -- of two bytes, where the second byte is the length of this response
         -- body packet.
-        local len, err = reader(2)
+        local len, err = socket:receive(2)
         if not len then
             if err == "timeout" then
                 _reset_socket(cli)

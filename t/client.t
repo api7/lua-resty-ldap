@@ -246,3 +246,45 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+
+
+=== TEST 10: client returns a controlled error when a response header contains a 0x00 byte
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+
+            local closed, step = false, 0
+            local sock = {
+                send    = function(_, p) return #p end,
+                receive = function()
+                    step = step + 1
+                    if step == 1 then
+                        return "\48\00" -- header: SEQUENCE tag, then a 0x00 length octet
+                    end
+                    return "" -- the declared zero-length body
+                end,
+                close   = function() closed = true return true end,
+            }
+
+            local client = ldap_client:new("127.0.0.1", 1389)
+            client.socket = sock
+            client.pinned = true
+
+            local res, err = client:simple_bind(
+                "cn=user01,ou=users,dc=example,dc=org", "password1")
+            assert(res == false, "a 0x00 header byte must fail, got " .. tostring(res))
+            assert(err:find("failed to decode ldap message", 1, true),
+                   "unexpected err: " .. tostring(err))
+            assert(closed, "the unusable socket must be closed")
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
