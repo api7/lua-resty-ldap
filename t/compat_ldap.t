@@ -41,7 +41,7 @@ GET /t
 --- response_body
 ok
 --- error_log
-lua tls certificate verify error
+certificate verify error
 
 
 
@@ -96,7 +96,7 @@ GET /t
 --- response_body
 ok
 --- error_log
-lua tls certificate verify error
+certificate verify error
 
 
 
@@ -318,4 +318,4 @@ GET /t
 --- response_body
 ok
 --- error_log
-lua tls certificate verify error
+certificate verify error

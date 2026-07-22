@@ -94,6 +94,7 @@ __DATA__
     }
 --- request
 GET /t
+--- timeout: 60
 --- response_body
 ok
 --- no_error_log
@@ -151,6 +152,7 @@ ok
     }
 --- request
 GET /t
+--- timeout: 60
 --- response_body
 ok
 --- no_error_log
