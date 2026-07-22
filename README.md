@@ -119,7 +119,7 @@ Compatibility entrypoint kept for APISIX's `ldap-auth` plugin (restored from v0.
 
 Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds; otherwise `ok` is `false` or `nil` and `err` carries the error.
 
-`username` is RFC 4514-escaped before being placed in the DN, so DN metacharacters bind as literal characters instead of injecting extra RDN components.
+`username` is placed in the DN verbatim, so the bind DN is byte-identical to the `<attribute>=<username>,<base_dn>` key APISIX's `ldap-auth` plugin derives for its Consumer lookup. A username that contains DN metacharacters (`, + " \ < > ; =`, a leading space or `#`, a trailing space, or a NUL) cannot be represented verbatim without injecting extra RDN components, so it is rejected — authentication fails before any connection is opened — rather than binding a DN that differs from the one APISIX looks up.
 
 `conf` is a table of below items (note the key names differ from `resty.ldap.client`'s `client_config`; they follow the v0.1.0 / `ldap-auth` contract):
 
@@ -131,7 +131,8 @@ Binds against the directory as `<attribute>=<username>,<base_dn>` with the given
 | `keepalive`           | number       | 60000      | Connection pool keepalive in milliseconds. |
 | `start_tls`           | boolean      | false      | Issue the StartTLS extended operation before binding. |
 | `ldaps`               | boolean      | false      | Connect using LDAP over TLS. |
-| `verify_ldap_host`    | boolean      | false      | Verify the server certificate during the TLS handshake. |
+| `tls_verify`          | boolean      | false      | Verify the server certificate during the TLS handshake. This is the key APISIX's `ldap-auth` passes. |
+| `verify_ldap_host`    | boolean      | false      | Legacy alias for `tls_verify` (pre-0.2). Honoured only when `tls_verify` is not set. |
 | `base_dn`             | string       | ou=users,dc=example,dc=org | Base DN the username is appended to. |
 | `attribute`           | string       | cn         | RDN attribute the username is bound as. |
 

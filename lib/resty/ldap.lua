@@ -13,7 +13,6 @@ local default_conf = {
     ldap_host = "localhost",
     ldap_port = 389,
     ldaps = false,
-    verify_ldap_host = false,
     base_dn = "ou=users,dc=example,dc=org",
     attribute = "cn",
     keepalive = 60000,
@@ -28,9 +27,17 @@ local function set_conf_default_values(conf)
 end
 
 
--- RFC 4514 s2.4 escaping for an RDN value; the bind DN below is built from a
--- client-supplied username. Not filter.escape(), which is RFC 4515 and leaves
--- ',' and '+' alone.
+local function resolve_tls_verify(conf)
+    if conf.tls_verify ~= nil then
+        return conf.tls_verify
+    end
+    if conf.verify_ldap_host ~= nil then
+        return conf.verify_ldap_host
+    end
+    return false
+end
+
+
 local function escape_dn_value(value)
     local lead = value:sub(1, 1)
     -- a lone leading space is covered by the lead rule alone
@@ -54,6 +61,11 @@ local _M = {}
 
 function _M.ldap_authenticate(given_username, given_password, conf)
     set_conf_default_values(conf)
+
+    if type(given_username) ~= "string" or
+       escape_dn_value(given_username) ~= given_username then
+        return false, "username contains characters not allowed in a bind DN"
+    end
 
     local is_authenticated
     local err, suppressed_err, ok, _
@@ -96,16 +108,20 @@ function _M.ldap_authenticate(given_username, given_password, conf)
     end
 
     if conf.start_tls or conf.ldaps then
-        _, err = sock:sslhandshake(true, conf.ldap_host, conf.verify_ldap_host)
+        _, err = sock:sslhandshake(true, conf.ldap_host, resolve_tls_verify(conf))
         if err ~= nil then
             return false, fmt("failed to do SSL handshake with %s:%s: %s",
                               conf.ldap_host, tostring(conf.ldap_port), err)
         end
     end
 
-    local who = conf.attribute .. "=" .. escape_dn_value(given_username) ..
-                "," .. conf.base_dn
+    local who = conf.attribute .. "=" .. given_username .. "," .. conf.base_dn
     is_authenticated, err = ldap.bind_request(sock, who, given_password)
+
+    if is_authenticated == nil then
+        -- transport failure; bind_request already closed the socket
+        return nil, err
+    end
 
     ok, suppressed_err = sock:setkeepalive(conf.keepalive)
     if not ok then

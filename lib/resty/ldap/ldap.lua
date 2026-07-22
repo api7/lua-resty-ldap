@@ -94,31 +94,44 @@ function _M.bind_request(socket, username, password)
     local ldapMsg = asn1_encode(ldapMessageId) ..
                         asn1_put_object(APPNO.BindRequest, asn1.CLASS.APPLICATION, 1, bindReq)
 
-    local packet, packet_len, packet_header, lerr
-
-    packet = asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
+    local packet = asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 
     ldapMessageId = ldapMessageId + 1
 
-    socket:send(packet)
-
-    packet = socket:receive(2)
-
-    packet_len, packet_header, lerr = calculate_payload_length(packet, 2, socket)
-    if not packet_len then
-        return false, lerr
+    local bytes, err = socket:send(packet)
+    if not bytes then
+        socket:close()
+        return nil, fmt("send bind request failed: %s", err or "closed")
     end
 
-    packet = socket:receive(packet_len)
+    local header, herr = socket:receive(2)
+    if not header then
+        socket:close()
+        return nil, fmt("receive bind response header failed: %s", herr or "closed")
+    end
+
+    local packet_len, packet_header, lerr = calculate_payload_length(header, 2, socket)
+    if not packet_len then
+        socket:close()
+        return nil, lerr
+    end
+
+    local body, berr = socket:receive(packet_len)
+    if not body then
+        socket:close()
+        return nil, fmt("receive bind response body failed: %s", berr or "closed")
+    end
 
     -- decode_message expects the full LDAPMessage, envelope header included
-    local res, err = decode_ldap(packet_header .. packet)
-    if err then
-        return false, "Invalid LDAP message encoding: " .. err
+    local res, derr = decode_ldap(packet_header .. body)
+    if derr then
+        socket:close()
+        return nil, "Invalid LDAP message encoding: " .. derr
     end
 
     if res.protocol_op ~= APPNO.BindResponse then
-        return false, fmt("Received incorrect Op in packet: %d, expected %d",
+        socket:close()
+        return nil, fmt("Received incorrect Op in packet: %d, expected %d",
                           res.protocol_op, APPNO.BindResponse)
     end
 
@@ -144,45 +157,65 @@ function _M.unbind_request(socket)
                 asn1_put_object(APPNO.UnbindRequest, asn1.CLASS.APPLICATION, 0)
     packet = asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 
-    socket:send(packet)
+    local bytes, err = socket:send(packet)
+    if not bytes then
+        socket:close()
+        return nil, fmt("send unbind request failed: %s", err or "closed")
+    end
 
     return true, ""
 end
 
 
 function _M.start_tls(socket)
-    local ldapMsg, packet, packet_len, packet_header, lerr
-
     local method_name = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, "1.3.6.1.4.1.1466.20037")
 
     ldapMessageId = ldapMessageId + 1
 
-    ldapMsg = asn1_encode(ldapMessageId) ..
+    local ldapMsg = asn1_encode(ldapMessageId) ..
                 asn1_put_object(APPNO.ExtendedRequest, asn1.CLASS.APPLICATION, 1, method_name)
 
-    packet = asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
-    socket:send(packet)
-    packet = socket:receive(2)
+    local packet = asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 
-    packet_len, packet_header, lerr = calculate_payload_length(packet, 2, socket)
+    local bytes, err = socket:send(packet)
+    if not bytes then
+        socket:close()
+        return false, fmt("send STARTTLS request failed: %s", err or "closed")
+    end
+
+    local header, herr = socket:receive(2)
+    if not header then
+        socket:close()
+        return false, fmt("receive STARTTLS response header failed: %s", herr or "closed")
+    end
+
+    local packet_len, packet_header, lerr = calculate_payload_length(header, 2, socket)
     if not packet_len then
+        socket:close()
         return false, lerr
     end
 
-    packet = socket:receive(packet_len)
+    local body, berr = socket:receive(packet_len)
+    if not body then
+        socket:close()
+        return false, fmt("receive STARTTLS response body failed: %s", berr or "closed")
+    end
 
     -- decode_message expects the full LDAPMessage, envelope header included
-    local res, err = decode_ldap(packet_header .. packet)
-    if err then
-        return false, "Invalid LDAP message encoding: " .. err
+    local res, derr = decode_ldap(packet_header .. body)
+    if derr then
+        socket:close()
+        return false, "Invalid LDAP message encoding: " .. derr
     end
 
     if res.protocol_op ~= APPNO.ExtendedResponse then
+        socket:close()
         return false, fmt("Received incorrect Op in packet: %d, expected %d",
                           res.protocol_op, APPNO.ExtendedResponse)
     end
 
     if res.result_code ~= 0 then
+        socket:close()
         local error_msg = ERROR_MSG[res.result_code]
 
         return false, fmt("\n  Error: %s\n  Details: %s",
