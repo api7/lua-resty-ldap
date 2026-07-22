@@ -196,22 +196,23 @@ ok
 
 
 
-=== TEST 7: ldap_authenticate rejects usernames with DN metacharacters
+=== TEST 7: a DN-metacharacter username is escaped into the bind DN
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
         content_by_lua_block {
             local ldap = require("resty.ldap")
-            -- a real port, but the metacharacter check must reject before connecting
+            -- "al,ice" must reach the server as cn=al\,ice and fail as a clean
+            -- credential error; sent raw, the server would refuse the DN itself
             local ok, err = ldap.ldap_authenticate("al,ice", "password1", {
                 ldap_host = "127.0.0.1",
                 ldap_port = 1389,
                 base_dn   = "ou=users,dc=example,dc=org",
                 attribute = "cn",
             })
-            assert(ok == false, "a metacharacter username must be rejected")
-            assert(err == "username contains characters not allowed in a bind DN",
-                   "unexpected err: " .. tostring(err))
+            assert(ok == false, "an unknown escaped username must fail cleanly")
+            assert(err:find("credential", 1, true),
+                   "expected a credential error: " .. tostring(err))
             ngx.say("ok")
         }
     }

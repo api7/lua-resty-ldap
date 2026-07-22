@@ -119,7 +119,7 @@ Compatibility entrypoint kept for APISIX's `ldap-auth` plugin (restored from v0.
 
 Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds; otherwise `ok` is `false` or `nil` and `err` carries the error.
 
-`username` is placed in the DN verbatim, so the bind DN is byte-identical to the `<attribute>=<username>,<base_dn>` key APISIX's `ldap-auth` plugin derives for its Consumer lookup. A username that contains DN metacharacters (`, + " \ < > ; =`, a leading space or `#`, a trailing space, or a NUL) cannot be represented verbatim without injecting extra RDN components, so it is rejected — authentication fails before any connection is opened — rather than binding a DN that differs from the one APISIX looks up.
+`username` is escaped per RFC 4514 when the bind DN is built, so DN metacharacters (`, + " \ < > ; =`, a leading space or `#`, a trailing space, or a NUL) are treated as literal characters of the RDN value instead of injecting extra RDN components. Any username string is accepted, as in v0.1.0.
 
 `conf` is a table of below items (note the key names differ from `resty.ldap.client`'s `client_config`; they follow the v0.1.0 / `ldap-auth` contract):
 

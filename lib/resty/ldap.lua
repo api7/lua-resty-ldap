@@ -38,6 +38,9 @@ local function resolve_tls_verify(conf)
 end
 
 
+-- RFC 4514 s2.4 escaping for an RDN value; the bind DN below is built from a
+-- client-supplied username. Not filter.escape(), which is RFC 4515 and leaves
+-- ',' and '+' alone.
 local function escape_dn_value(value)
     local lead = value:sub(1, 1)
     -- a lone leading space is covered by the lead rule alone
@@ -62,9 +65,12 @@ local _M = {}
 function _M.ldap_authenticate(given_username, given_password, conf)
     set_conf_default_values(conf)
 
-    if type(given_username) ~= "string" or
-       escape_dn_value(given_username) ~= given_username then
-        return false, "username contains characters not allowed in a bind DN"
+    -- same coercion contract as ldap.bind_request
+    if type(given_username) == "number" then
+        given_username = tostring(given_username)
+    end
+    if type(given_username) ~= "string" then
+        return false, "bind username must be a string"
     end
 
     local is_authenticated
@@ -115,7 +121,8 @@ function _M.ldap_authenticate(given_username, given_password, conf)
         end
     end
 
-    local who = conf.attribute .. "=" .. given_username .. "," .. conf.base_dn
+    local who = conf.attribute .. "=" .. escape_dn_value(given_username) ..
+                "," .. conf.base_dn
     is_authenticated, err = ldap.bind_request(sock, who, given_password)
 
     if is_authenticated == nil then
