@@ -48,6 +48,11 @@ jobs:
             fi
             sleep 1
           done
+          if [ "$ok" -lt 3 ]; then
+            echo "OpenLDAP did not become ready" >&2
+            docker logs openldap || true
+            exit 1
+          fi
           docker cp t/fixtures/ad.ldif openldap:/tmp/ad.ldif
           docker exec openldap ldapadd -x -H ldap://127.0.0.1:1389 -D "cn=admin,dc=example,dc=org" -w adminpassword -f /tmp/ad.ldif
           export PATH=$OPENRESTY_PREFIX/nginx/sbin:$OPENRESTY_PREFIX/luajit/bin:$PATH
