@@ -78,6 +78,17 @@ end
 
 
 function _M.bind_request(socket, username, password)
+    -- pin the LDAPString type: put_object rejects a non-string payload, so
+    -- catch it here rather than as a concat error on the next line
+    if type(username) == "number" then username = tostring(username) end
+    if type(password) == "number" then password = tostring(password) end
+    if type(username) ~= "string" then
+        return false, "bind username must be a string"
+    end
+    if type(password) ~= "string" then
+        return false, "bind password must be a string"
+    end
+
     local ldapAuth = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, password)
     local bindReq = asn1_encode(3) .. asn1_encode(username) .. ldapAuth
     local ldapMsg = asn1_encode(ldapMessageId) ..

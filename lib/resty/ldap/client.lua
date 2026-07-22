@@ -17,15 +17,13 @@ local MAX_LDAP_MESSAGE_SIZE = 16 * 1024 * 1024
 local _M = {}
 local mt = { __index = _M }
 
--- Returns the body length and the header bytes, or nil plus an error. Callers
--- feed the length straight to socket:receive(), so it is validated here.
+-- returns body length + header bytes, or nil + error (length is validated)
 local function calculate_payload_length(encStr, pos, socket)
     local elen
 
     pos, elen = bunpack(encStr, "C", pos)
 
-    -- 0x80 is the indefinite form and 0xff is reserved; RFC 4511 s5.1 requires
-    -- the definite form. Neither is a 128-byte short-form length.
+    -- 0x80 (indefinite) and 0xff (reserved) are illegal, not short-form lengths
     if elen == 0x80 or elen == 0xff then
         return nil, nil, "invalid BER length: indefinite or reserved form"
     end
@@ -161,8 +159,7 @@ local function _init_socket(self)
     self.socket = sock
 end
 
--- Drop the socket after an unrecoverable error. A pinned session must lose its
--- pin too, or later calls keep reaching for the dead socket.
+-- drop the socket (and its pin) after an unrecoverable error
 local function _reset_socket(cli)
     local sock = cli.socket
     cli.socket = nil
@@ -256,8 +253,8 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
     end
 
-    -- Only return the socket to the pool for single-shot ops; a pinned session
-    -- is released explicitly by the caller via set_keepalive()/close().
+    -- single-shot ops return the socket to the pool; a pinned session is
+    -- released explicitly by the caller
     if not cli.pinned then
         socket:setkeepalive(cli.socket_config.keepalive_timeout)
     end
@@ -335,7 +332,14 @@ end
 
 
 function _M.simple_bind(self, dn, password)
-    local res, err = _send_recieve(self, protocol.simple_bind_request(dn, password))
+    -- bind to a local first: as the last call argument a (nil, err) return would
+    -- expand into _send_recieve's multi_resp_hint and send a nil request
+    local req, berr = protocol.simple_bind_request(dn, password)
+    if not req then
+        return false, berr
+    end
+
+    local res, err = _send_recieve(self, req)
     if not res then
         return false, err
     end
