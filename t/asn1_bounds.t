@@ -130,6 +130,17 @@ ok
             local _, vf, ef = asn1.decode(di, 0.5)
             assert(ef ~= nil, "fractional start must error, not silently mis-decode")
 
+            -- fractional start at a NONZERO offset where flooring would land on a valid TLV:
+            -- rejection must be pinned, not left to a downstream parse error
+            local der2 = ldap_hex("41 04 03 41 42 43 00 00 00 00")
+            local og, eg = asn1.get_object(der2, 1.9, #der2)
+            assert(og == nil, "fractional start 1.9 must be rejected, not floored onto the TLV at 1"
+                              .. (og and (" (got hl=" .. tostring(og.hl) .. ")") or ""))
+            assert(eg ~= nil, "fractional start 1.9 must report an error")
+            local _, vg, dg = asn1.decode(der2, 1.2)
+            assert(vg == nil and dg ~= nil,
+                   "decode must reject fractional offset 1.2 instead of silently flooring it")
+
             -- whenever get_object succeeds, every reported offset must be integral
             local buffers = {
                 ldap_hex("04 03 41 42 43"),
@@ -286,45 +297,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 7: decode_message returns an error, never raises, on a nil attribute type
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local protocol = require("resty.ldap.protocol")
-            local ldap_hex = require("ldap_hex")
-
-            -- protocol.lua:232 keys on atype; a nil atype raises "table index is nil"
-            local cases = {
-                -- SearchResultEntry, attr type = NULL (05 00), vals = empty SET
-                { "NULL type",    "30 10 02 01 03 64 0b 04 01 78 30 06 30 04 05 00 31 00" },
-                -- SearchResultEntry, attr type = BOOLEAN (01 01 01), vals = empty SET
-                { "BOOLEAN type", "30 11 02 01 03 64 0c 04 01 78 30 07 30 05 01 01 01 31 00" },
-            }
-            for _, c in ipairs(cases) do
-                local ok, res, err = pcall(protocol.decode_message, ldap_hex(c[2]))
-                assert(ok, c[1] .. ": decode_message must not raise, got: " .. tostring(res))
-                assert(res == nil, c[1] .. ": must not return a result")
-                assert(err ~= nil, c[1] .. ": must report an error")
-            end
-
-            -- a well-formed entry with the same shape still decodes
-            local good = assert(protocol.decode_message(
-                ldap_hex("30 11 02 01 03 64 0c 04 01 78 30 07 30 05 04 01 73 31 00")))
-            assert(good.entry_dn == "x", "dn")
-            assert(type(good.attributes.s) == "table" and #good.attributes.s == 0, "empty vals")
-
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-=== TEST 8: bytes trailing the PartialAttributeList inside the op are rejected
+=== TEST 7: bytes trailing the PartialAttributeList inside the op are rejected
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -359,7 +332,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 9: BER leniency on non-minimal lengths is preserved (guard rail)
+=== TEST 8: BER leniency on non-minimal lengths is preserved (guard rail)
 --- http_config eval: $::HttpConfig
 --- config
     location /t {

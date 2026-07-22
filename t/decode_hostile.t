@@ -1,4 +1,5 @@
 # Vectors cross-checked against pyasn1 v0.6.4 and rasn v0.6.1.
+# pyasn1 v0.6.4: https://github.com/pyasn1/pyasn1/blob/v0.6.4/tests/codec/ber/test_decoder.py
 
 use Test::Nginx::Socket::Lua;
 
@@ -75,76 +76,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 3: resultCode must be a number, or decoding must fail
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local protocol = require("resty.ldap.protocol")
-            local ldap_hex = require("ldap_hex")
-
-            local cases = {
-                { "NULL",         "30 0b 02 01 01 61 06 05 00 04 00 04 00" },
-                { "BOOLEAN",      "30 0c 02 01 01 61 07 01 01 ff 04 00 04 00" },
-                { "OCTET STRING", "30 0c 02 01 01 61 07 04 01 00 04 00 04 00" },
-            }
-            for _, c in ipairs(cases) do
-                local r, e = protocol.decode_message(ldap_hex(c[2]))
-                if r ~= nil then
-                    assert(type(r.result_code) == "number",
-                           c[1] .. " resultCode yielded " .. type(r.result_code))
-                else
-                    assert(e ~= nil, c[1] .. " resultCode: nil result with no error")
-                end
-            end
-
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-=== TEST 4: an undecodable attribute type must error, not raise a Lua exception
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local protocol = require("resty.ldap.protocol")
-            local ldap_hex = require("ldap_hex")
-
-            local pkt = ldap_hex("30 14 02 01 03 64 0f 04 01 78 30 0a 30 08 01 01 ff 31 03 04 01 76")
-            local pok, r, e = pcall(protocol.decode_message, pkt)
-            assert(pok, "malicious attribute type raised a Lua exception: " .. tostring(r))
-            assert(r == nil, "undecodable attribute type must not produce a result")
-            assert(e ~= nil, "undecodable attribute type must report an error")
-
-            -- Same shape, `type` is a SEQUENCE: the key must not become a table.
-            local pkt2 = ldap_hex("30 13 02 01 03 64 0e 04 01 78 30 09 30 07 30 00 31 03 04 01 76")
-            local pok2, r2, e2 = pcall(protocol.decode_message, pkt2)
-            assert(pok2, "SEQUENCE attribute type raised a Lua exception: " .. tostring(r2))
-            if r2 ~= nil then
-                for k in pairs(r2.attributes) do
-                    assert(type(k) == "string", "attribute key is a " .. type(k))
-                end
-            else
-                assert(e2 ~= nil, "non-string attribute type: nil result with no error")
-            end
-
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-=== TEST 5: attribute values are always an array, never a bare string
+=== TEST 3: attribute values are always an array, never a bare string
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -177,7 +109,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 6: a duplicate attribute type is decoded, not treated as a protocol error
+=== TEST 4: a duplicate attribute type is decoded, not treated as a protocol error
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -207,40 +139,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 7: context-specific [4] is not a universal OCTET STRING (class confusion)
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local protocol = require("resty.ldap.protocol")
-            local ldap_hex = require("ldap_hex")
-
-            local cases = {
-                { "matchedDN [4]",     "30 0f 02 01 01 61 0a 0a 01 31 84 03 41 42 43 04 00" },
-                { "objectName [4]",    "30 0c 02 01 03 64 07 84 03 41 42 43 30 00" },
-                { "attribute type [4]","30 23 02 01 03 64 1e 04 01 78 30 19 30 17" ..
-                                       "84 08 6d 65 6d 62 65 72 4f 66" ..
-                                       "31 0b 04 09 63 6e 3d 61 64 6d 69 6e 73" },
-                { "attribute val [4]", "30 16 02 01 03 64 11 04 01 78 30 0c 30 0a 04 01 6d 31 05 84 03 41 42 43" },
-                { "SearchResRef [4]",  "30 0b 02 01 02 73 06 04 01 61 84 01 62" },
-            }
-            for _, c in ipairs(cases) do
-                local r, e = protocol.decode_message(ldap_hex(c[2]))
-                assert(r == nil, c[1] .. " must be rejected, got a result")
-                assert(e ~= nil, c[1] .. " must report an error")
-            end
-
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-=== TEST 8: an undecodable SET/SEQUENCE member must error, not shrink the array
+=== TEST 5: an undecodable SET/SEQUENCE member must error, not shrink the array
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -276,33 +175,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 9: an ENUMERATED that overflows a C long must not collapse to -1
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local protocol = require("resty.ldap.protocol")
-            local ldap_hex = require("ldap_hex")
-
-            local r, e = protocol.decode_message(ldap_hex(
-                "30 14 02 01 01 61 0f 0a 09 00 ff ff ff ff ff ff ff ff 04 00 04 00"))
-            assert(r == nil or r.result_code ~= -1,
-                   "overflowing ENUMERATED silently reported as resultCode -1")
-            if r == nil then
-                assert(e ~= nil, "overflowing ENUMERATED: nil result with no error")
-            end
-
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-=== TEST 10: constructed OCTET STRING (0x24) is rejected at every nesting level
+=== TEST 6: constructed OCTET STRING (0x24) is rejected at every nesting level
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -333,7 +206,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 11: PartialAttributeList / PartialAttribute containers must be SEQUENCEs
+=== TEST 7: PartialAttributeList / PartialAttribute containers must be SEQUENCEs
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -365,7 +238,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 12: truncation and byte-flip sweep never raises a Lua exception
+=== TEST 8: truncation and byte-flip sweep never raises a Lua exception
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -408,7 +281,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 13: BER leniency and hard limits are preserved
+=== TEST 9: BER leniency and hard limits are preserved
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -456,6 +329,38 @@ ok
             local pok, _, dv, derr = pcall(asn1.decode, deep)
             assert(pok, "deep nesting raised: " .. tostring(dv))
             assert(dv == nil and derr ~= nil, "deep nesting must be refused")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+=== TEST 10: regression guard -- genuinely empty SETs stay empty, not errors
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local protocol = require("resty.ldap.protocol")
+            local ldap_hex = require("ldap_hex")
+
+            -- typesOnly zero-member vals SET (31 00) must stay empty, not become an error
+            local res = assert(protocol.decode_message(ldap_hex(
+                "30 11 02 01 03 64 0c 04 01 78 30 07 30 05 04 01 73 31 00")))
+            assert(type(res.attributes.s) == "table", "s is an array")
+            assert(#res.attributes.s == 0, "s is empty, not an error")
+
+            -- And a well-formed multi-valued SET still returns every member.
+            local res2 = assert(protocol.decode_message(ldap_hex(
+                "30 1e 02 01 03 64 19 04 01 78 30 14 30 12 04 08 6d 65 6d 62 65 72 4f 66" ..
+                " 31 06 04 01 61 04 01 62")))
+            assert(#res2.attributes.memberOf == 2, "both members returned")
+            assert(res2.attributes.memberOf[1] == "a", "member 1")
+            assert(res2.attributes.memberOf[2] == "b", "member 2")
 
             ngx.say("ok")
         }

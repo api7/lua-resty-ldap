@@ -1,4 +1,5 @@
 # pyasn1 v0.6.4 Sequence/SetDecoderTestCase DefMode: https://github.com/pyasn1/pyasn1/blob/v0.6.4/tests/codec/ber/test_decoder.py
+# Vectors also cross-checked against rasn v0.6.1 and Go encoding/asn1.
 
 use Test::Nginx::Socket::Lua;
 
@@ -27,9 +28,17 @@ __DATA__
             local ldap_hex = require("ldap_hex")
 
             -- SET { "A", BOOLEAN TRUE }: BOOLEAN has no decoder; slot silently dropped -> {"A"}.
-            local _, v, err = asn1.decode(ldap_hex("31 06 04 01 41 01 01 ff"))
+            local off, v, err = asn1.decode(ldap_hex("31 06 04 01 41 01 01 ff"))
             assert(err ~= nil, "undecodable SET member must report an error")
             assert(v == nil, "no value when a member cannot be decoded")
+            assert(off == nil, "no offset alongside the error")
+
+            -- rasn v0.6.1 sequence() vector: the undecodable member is an IA5String (0x16)
+            local off2, v2, err2 = asn1.decode(ldap_hex("30 0a 16 05 53 6d 69 74 68 01 01 ff"))
+            assert(err2 ~= nil, "SEQUENCE with undecodable members must report an error, got value=" ..
+                   tostring(v2) .. " n=" .. (type(v2) == "table" and #v2 or -1))
+            assert(v2 == nil, "no partial value alongside the error")
+            assert(off2 == nil, "no offset alongside the error")
 
             ngx.say("ok")
         }
@@ -50,19 +59,27 @@ ok
             local ldap_hex = require("ldap_hex")
 
             -- Undecodable member FIRST: currently yields {"A"} at index 1 (member 2's value).
-            local _, v, err = asn1.decode(ldap_hex("31 06 01 01 ff 04 01 41"))
+            local off, v, err = asn1.decode(ldap_hex("31 06 01 01 ff 04 01 41"))
             assert(err ~= nil, "leading undecodable member must report an error")
             assert(v == nil, "no value when a member cannot be decoded")
+            assert(off == nil, "no offset alongside the error")
+
+            -- pyasn1 v0.6.4: undecodable MIDDLE member (the suite's only middle-position case)
+            local off2, v2, err2 = asn1.decode(ldap_hex("30 09 02 01 01 01 01 ff 02 01 02"))
+            assert(err2 ~= nil, "undecodable middle member must error, not re-index the array")
+            assert(v2 == nil, "no partial array alongside the error")
+            assert(off2 == nil, "no offset alongside the error")
 
             -- SET with only an undecodable member currently decodes to {}, like a genuine empty SET.
-            local _, v2, err2 = asn1.decode(ldap_hex("31 03 01 01 ff"))
-            assert(err2 ~= nil, "SET of one undecodable member must error")
-            assert(v2 == nil, "no value for an all-undecodable SET")
+            local off3, v3, err3 = asn1.decode(ldap_hex("31 03 01 01 ff"))
+            assert(err3 ~= nil, "SET of one undecodable member must error")
+            assert(v3 == nil, "no value for an all-undecodable SET")
+            assert(off3 == nil, "no offset alongside the error")
 
             -- ...while a genuinely empty SET stays a clean empty array.
-            local _, v3, err3 = asn1.decode(ldap_hex("31 00"))
-            assert(err3 == nil, "empty SET is still valid: " .. tostring(err3))
-            assert(type(v3) == "table" and #v3 == 0, "empty SET decodes to {}")
+            local _, v4, err4 = asn1.decode(ldap_hex("31 00"))
+            assert(err4 == nil, "empty SET is still valid: " .. tostring(err4))
+            assert(type(v4) == "table" and #v4 == 0, "empty SET decodes to {}")
 
             ngx.say("ok")
         }
@@ -83,14 +100,27 @@ ok
             local ldap_hex = require("ldap_hex")
 
             -- SEQUENCE { OCTET STRING "A", NULL }: the NULL slot vanishes -> {"A"}
-            local _, v, err = asn1.decode(ldap_hex("30 05 04 01 41 05 00"))
+            local off, v, err = asn1.decode(ldap_hex("30 05 04 01 41 05 00"))
             assert(err ~= nil, "NULL member must report an error, not vanish")
             assert(v == nil, "no value when a NULL member is dropped")
+            assert(off == nil, "no offset alongside the error")
 
             -- Stray EOC filler in a definite-length container (30 02); tag-0 TLV that vanishes -> {}.
-            local _, v2, err2 = asn1.decode(ldap_hex("30 02 00 00"))
+            local off2, v2, err2 = asn1.decode(ldap_hex("30 02 00 00"))
             assert(err2 ~= nil, "EOC filler in a definite-length SEQUENCE must error")
             assert(v2 == nil, "no value for EOC filler")
+            assert(off2 == nil, "no offset alongside the error")
+
+            -- pyasn1 v0.6.4 DefMode: NULL first with two decodable members after, SEQUENCE and SET
+            local _, v3, err3 = asn1.decode(
+                ldap_hex("30 12 05 00 04 0b 71 75 69 63 6b 20 62 72 6f 77 6e 02 01 01"))
+            assert(err3 ~= nil, "NULL-led SEQUENCE must error rather than silently shrink; got n=" ..
+                   (type(v3) == "table" and #v3 or -1))
+            assert(v3 == nil, "no partial array alongside the error")
+            local _, v4, err4 = asn1.decode(
+                ldap_hex("31 12 05 00 04 0b 71 75 69 63 6b 20 62 72 6f 77 6e 02 01 01"))
+            assert(err4 ~= nil, "NULL-led SET must error rather than silently shrink")
+            assert(v4 == nil, "no partial array alongside the error")
 
             ngx.say("ok")
         }

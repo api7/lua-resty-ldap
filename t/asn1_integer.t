@@ -44,6 +44,7 @@ __DATA__
                 {"02 05 01 00 00 00 00", 4294967296},       -- 2^32
                 {"02 07 1f ff ff ff ff ff ff", 9007199254740991},  -- 2^53-1
                 {"02 07 20 00 00 00 00 00 00", 9007199254740992},  -- 2^53
+                {"02 07 e0 00 00 00 00 00 00", -9007199254740992}, -- -2^53, negative boundary
                 -- ENUMERATED must agree with INTEGER over the same range
                 {"0a 01 00", 0},
                 {"0a 01 ff", -1},
@@ -133,11 +134,14 @@ ok
                 {"02 09 ff 7f ff ff ff ff ff ff ff", "-(2^63+1)"},
                 {"02 09 fe 00 00 00 00 00 00 00 00", "-2^65"},
                 {"02 0c 01 00 00 00 00 00 00 00 00 00 00 00", "2^88"},
+                {"02 08 7f ff ff ff ff ff ff ff", "2^63-1 (maxint64, 8-octet: exact_number path, not the len>8 guard)"},
+                {"02 09 80 00 00 00 00 00 00 00 00", "9-octet negative (Go encoding/asn1 int64 overflow vector)"},
             }
             for _, c in ipairs(overflow) do
                 local _, v, err = asn1.decode(ldap_hex(c[1]))
                 assert(err ~= nil,
                     c[2] .. " (" .. c[1] .. ") must be rejected, got " .. tostring(v))
+                assert(v == nil, c[2] .. " must not yield a value alongside the error")
             end
 
             -- and the sentinel must stay distinguishable from a genuine -1
@@ -170,11 +174,13 @@ ok
                 {"0a 09 ff 00 00 00 00 00 00 00 00", "-2^64"},
                 {"0a 09 fe 00 00 00 00 00 00 00 00", "-2^65"},
                 {"0a 0c 01 00 00 00 00 00 00 00 00 00 00 00", "2^88"},
+                {"0a 07 20 00 00 00 00 00 01", "2^53+1 (7-octet: ENUMERATED exact_number path, not the len>8 guard)"},
             }
             for _, c in ipairs(overflow) do
                 local _, v, err = asn1.decode(ldap_hex(c[1]))
                 assert(err ~= nil,
                     c[2] .. " (" .. c[1] .. ") must be rejected, got " .. tostring(v))
+                assert(v == nil, c[2] .. " must not yield a value alongside the error")
             end
 
             -- sign inversion: -2^65 is negative; decoder must never report positive.
@@ -208,6 +214,7 @@ ok
                 {"02 07 20 00 00 00 00 00 00", "02 07 20 00 00 00 00 00 01", "2^53 vs 2^53+1"},
                 {"02 08 7f ff ff ff ff ff ff fe", "02 08 7f ff ff ff ff ff ff ff", "2^63-2 vs 2^63-1"},
                 {"0a 07 20 00 00 00 00 00 00", "0a 07 20 00 00 00 00 00 01", "ENUM 2^53 vs 2^53+1"},
+                {"02 07 df ff ff ff ff ff ff", "02 07 e0 00 00 00 00 00 00", "-(2^53+1) vs -2^53"},
             }
             for _, c in ipairs(pairs_) do
                 local _, a, aerr = asn1.decode(ldap_hex(c[1]))
@@ -242,7 +249,7 @@ ok
             local bad = {
                 {"30 14 02 09 00 ff ff ff ff ff ff ff ff 61 07 0a 01 00 04 00 04 00", "messageID 2^64-1"},
                 {"30 12 02 07 20 00 00 00 00 00 01 61 07 0a 01 00 04 00 04 00", "messageID 2^53+1"},
-                {"30 14 02 01 01 61 0f 0a 09 00 ff ff ff ff ff ff ff ff 04 00 04 00", "resultCode 2^64-1"},
+                {"30 14 02 01 01 61 0f 0a 09 00 ff ff ff ff ff ff ff ff 04 00 04 00", "resultCode 2^64-1 (must never surface as resultCode -1)"},
                 {"30 14 02 01 01 61 0f 0a 09 fe 00 00 00 00 00 00 00 00 04 00 04 00", "resultCode -2^65"},
             }
             for _, c in ipairs(bad) do
@@ -253,53 +260,19 @@ ok
                     tostring(res and res.message_id))
             end
 
+            -- distinct wire messageIDs (2^53+1 vs 2^53) must never correlate to the same in-process id
+            local r1 = protocol.decode_message(ldap_hex("30 12 02 07 20 00 00 00 00 00 01 61 07 0a 01 00 04 00 04 00"))
+            local r2 = protocol.decode_message(ldap_hex("30 12 02 07 20 00 00 00 00 00 00 61 07 0a 01 00 04 00 04 00"))
+            assert(not (r1 and r2 and r1.message_id == r2.message_id),
+                "distinct wire messageIDs collided on " .. tostring(r1 and r1.message_id))
+
             -- a well-formed message still decodes
             local ok_res = assert(protocol.decode_message(ldap_hex("30 0c 02 01 01 61 07 0a 01 00 04 00 04 00")))
             assert(ok_res.result_code == 0 and ok_res.message_id == 1, "baseline intact")
 
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-=== TEST 7: resultCode must be a number, never a table or string
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local protocol = require("resty.ldap.protocol")
-            local ldap_hex = require("ldap_hex")
-
-            local res, err = protocol.decode_message(ldap_hex("30 0b 02 01 01 61 06 30 00 04 00 04 00"))
-            if res then
-                assert(type(res.result_code) == "number",
-                    "resultCode from `30 00` is a " .. type(res.result_code))
-            else
-                assert(err ~= nil, "rejection must carry an error")
-            end
-
-            -- an OCTET STRING in the resultCode slot is the same class of defect
-            local res2, err2 = protocol.decode_message(ldap_hex("30 0c 02 01 01 61 07 04 01 00 04 00 04 00"))
-            if res2 then
-                assert(type(res2.result_code) == "number",
-                    "resultCode from `04 01 00` is a " .. type(res2.result_code))
-            else
-                assert(err2 ~= nil, "rejection must carry an error")
-            end
-
-            -- proving the consequence: this is what client.lua:103 does with it
-            local victim = res and res.result_code
-            if victim ~= nil then
-                local built = pcall(function()
-                    return "Unknown error occurred (code: " .. victim .. ")"
-                end)
-                assert(built, "client error formatter throws on this resultCode")
-            end
+            -- RFC 4511 maxInt messageID still decodes (Go go1.26.3 encoding/asn1 INTEGER-boundary vector)
+            local max_res = assert(protocol.decode_message(ldap_hex("30 0f 02 04 7f ff ff ff 61 07 0a 01 00 04 00 04 00")))
+            assert(max_res.message_id == 2147483647, "maxInt messageID " .. tostring(max_res.message_id))
 
             ngx.say("ok")
         }

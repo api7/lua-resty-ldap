@@ -122,6 +122,11 @@ ok
                 assert(err ~= nil, c[4] .. " reports an error")
             end
 
+            -- the envelope itself: a primitive-encoded LDAPMessage must be rejected
+            local bad, berr = protocol.decode_message(ldap_hex("10 0c 02 01 01 61 07 0a 01 00 04 00 04 00"))
+            assert(bad == nil, "primitive LDAPMessage envelope must be rejected")
+            assert(berr ~= nil, "primitive LDAPMessage envelope must report an error")
+
             ngx.say("ok")
         }
     }

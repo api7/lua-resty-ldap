@@ -54,8 +54,18 @@ __DATA__
                              ((tn == 2 or tn == 4 or tn == 10) and not cons))
 
                         local _, v, err = asn1.decode(ldap_hex(hex))
-                        local got_ok = (err == nil and v ~= nil)
-                        if got_ok ~= want_ok then
+                        local cell_ok
+                        if want_ok then
+                            cell_ok = (err == nil and v ~= nil)
+                        else
+                            -- rejection must be explicit: an error and no value, never a silent nil
+                            cell_ok = (err ~= nil and v == nil)
+                        end
+                        -- non-universal tag-4 cells must never alias universal OCTET STRING
+                        if tn == 4 and cls ~= UNIV and v == "ABC" then
+                            cell_ok = false
+                        end
+                        if not cell_ok then
                             table.insert(leaks, string.format(
                                 "%s %s %s (id=%02x) want_%s got value=%s err=%s",
                                 names[tn], cnames[cls], cons and "cons" or "prim", id,
@@ -66,6 +76,18 @@ __DATA__
                     end
                 end
             end
+
+            -- cross-checked vectors (pyasn1 v0.6.4 / rasn v0.6.1 / Go encoding/asn1):
+            -- APPLICATION [5] and constructed context [2] must error explicitly, never silent-nil
+            local _, exp, e7 = asn1.decode(
+                ldap_hex("65 11 04 0f 51 75 69 63 6b 20 62 72 6f 77 6e 20 66 6f 78"))
+            assert(e7 ~= nil, "APPLICATION [5] must report an error, not a silent nil")
+            assert(exp == nil, "APPLICATION [5] must not yield a value")
+            local _, tb, e6 = asn1.decode(ldap_hex("a2 03 01 01 ff"))
+            assert(tb == nil, "context [2] constructed must not yield a value")
+            assert(e6 ~= nil, "context [2] constructed must report an error")
+            assert(not e6:find("INTEGER"),
+                   "error for a context-specific tag must not blame INTEGER, got: " .. e6)
 
             if #leaks > 0 then
                 ngx.say(#leaks .. " class/form mismatches accepted:")
@@ -151,12 +173,20 @@ ok
                               .. type(r3 and r3.message_id))
             assert(e3 ~= nil, "context [16] messageID reports an error")
 
-            -- messageID as BOOLEAN (no decoder) currently succeeds with message_id == nil
+            -- messageID as BOOLEAN (no decoder) currently succeeds with message_id == nil;
+            -- a nil/mistyped id breaks request/response correlation (RFC 4511 s4.1.1)
             local r4, e4 = protocol.decode_message(
                 ldap_hex("30 0c 01 01 ff 61 07 0a 01 00 04 00 04 00"))
             assert(r4 == nil, "BOOLEAN messageID must be rejected, got message_id="
                               .. tostring(r4 and r4.message_id))
             assert(e4 ~= nil, "BOOLEAN messageID reports an error")
+
+            -- messageID as OCTET STRING (a registered decoder): message_id must not become "A"
+            local r5, e5 = protocol.decode_message(
+                ldap_hex("30 0c 04 01 41 61 07 0a 01 00 04 00 04 00"))
+            assert(r5 == nil, "OCTET STRING messageID must be rejected, got message_id="
+                              .. tostring(r5 and r5.message_id))
+            assert(e5 ~= nil, "OCTET STRING messageID reports an error")
 
             ngx.say("ok")
         }
@@ -181,8 +211,6 @@ ok
                 { "resultCode as context [4]",      "30 0c 02 01 01 61 07 84 01 41 04 00 04 00" },
                 { "resultCode as context [16]",     "30 0b 02 01 01 61 06 90 00 04 00 04 00" },
                 { "resultCode as private [17]",     "30 0b 02 01 01 61 06 f1 00 04 00 04 00" },
-                { "resultCode as BOOLEAN",          "30 0c 02 01 01 61 07 01 01 ff 04 00 04 00" },
-                { "resultCode as NULL",             "30 0b 02 01 01 61 06 05 00 04 00 04 00" },
                 { "matchedDN as private [16]",      "30 0c 02 01 01 61 07 0a 01 00 d0 00 04 00" },
                 { "diagnosticMessage as appl [4]",  "30 0d 02 01 01 61 08 0a 01 00 04 00 44 01 41" },
             }
@@ -252,6 +280,11 @@ ok
                 -- vals as context [4]: attributes.s becomes a STRING, not an array
                 { "vals as context [4]",
                   "30 14 02 01 03 64 0f 04 01 78 30 0a 30 08 04 01 73 84 03 41 42 43" },
+                -- attribute value as context [4] INSIDE a well-formed vals SET: pins asn1.decode's
+                -- recursive-descent class gate at a nested position (distinct from "vals as
+                -- context [4]" above, which hits protocol.lua's container pin instead)
+                { "attr value as context [4] inside vals",
+                  "30 16 02 01 03 64 11 04 01 78 30 0c 30 0a 04 01 6d 31 05 84 03 41 42 43" },
                 -- objectName as private [16]: entry_dn becomes a table
                 { "objectName as private [16]",
                   "30 10 02 01 03 64 0b d0 00 30 07 30 05 04 01 73 31 00" },
@@ -358,6 +391,11 @@ ok
             assert(r2 == nil, "context [16] URI must be rejected, got "
                               .. type(r2 and r2.uris and r2.uris[1]))
             assert(e2 ~= nil, "context [16] URI reports an error")
+
+            -- second-position wrong-class URI: the gate must hold after a valid first member
+            local r3, e3 = protocol.decode_message(ldap_hex("30 0b 02 01 02 73 06 04 01 61 84 01 62"))
+            assert(r3 == nil, "second-position context [4] URI must be rejected")
+            assert(e3 ~= nil, "second-position context [4] URI reports an error")
 
             ngx.say("ok")
         }

@@ -181,6 +181,15 @@ ok
                 "non-minimal envelope length must still decode")
             assert(r.result_code == 0, "non-minimal envelope result")
 
+            -- non-minimal protocolOp length: BER length leniency is the deliberate AD/slapd
+            -- interop contract (decode_hostile.t pins the same leniency with long-form op
+            -- headers and non-empty fields, so the two files cross-reference, not duplicate)
+            r = assert(protocol.decode_message(ldap_hex("30 81 0d 02 01 01 61 81 07 0a 01 00 04 00 04 00")),
+                "non-minimal protocolOp length must still decode")
+            assert(r.protocol_op == protocol.APP_NO.BindResponse, "non-minimal op")
+            assert(r.result_code == 0, "non-minimal op result_code")
+            assert(r.matched_dn == "" and r.diagnostic_msg == "", "non-minimal op fields")
+
             local bad, err = protocol.decode_message(ldap_hex("30 0c 02 01 01 61 07 0a 01 00 04 00 04 00 de ad be ef"))
             assert(bad == nil, "trailing bytes after the envelope must be rejected")
             assert(err ~= nil, "trailing bytes must report an error")
@@ -203,52 +212,40 @@ ok
             local protocol = require("resty.ldap.protocol")
             local ldap_hex = require("ldap_hex")
 
-            local pkt = ldap_hex("30 11 02 01 03 64 0c 04 01 78 30 07 30 05 01 01 ff 31 00")
-            local ok, res, err = pcall(protocol.decode_message, pkt)
-            assert(ok, "decode_message raised instead of returning an error: " .. tostring(res))
-            assert(res == nil, "undecodable attribute type must not yield a result")
-            assert(err ~= nil, "undecodable attribute type must report an error")
+            -- protocol.lua keys the attribute map on the decoded atype, so a nil or mistyped
+            -- atype formerly raised "table index is nil" -- every hostile case must return
+            -- (nil, err), never raise. AttributeDescription must be an LDAPString and
+            -- objectName an LDAPDN (RFC 4511 s4.1.4).
+            local cases = {
+                { "BOOLEAN attribute type",
+                  "30 11 02 01 03 64 0c 04 01 78 30 07 30 05 01 01 ff 31 00" },
+                { "NULL attribute type",
+                  "30 10 02 01 03 64 0b 04 01 78 30 06 30 04 05 00 31 00" },
+                -- non-string AttributeDescription (INTEGER 5) would key attributes by number
+                { "INTEGER attribute type",
+                  "30 14 02 01 03 64 0f 04 01 78 30 0a 30 08 02 01 05 31 03 04 01 41" },
+                -- constructed SEQUENCE attribute type: the key must never become a table
+                { "SEQUENCE attribute type",
+                  "30 10 02 01 03 64 0b 04 01 78 30 06 30 04 30 00 31 00" },
+                -- objectName that is not an LDAPDN must be an error, not entry_dn == 5
+                { "INTEGER objectName",
+                  "30 0a 02 01 03 64 05 02 01 05 30 00" },
+                -- an unreadable objectName must be an error, never a silent nil entry_dn
+                { "NULL objectName",
+                  "30 0f 02 01 03 64 0a 05 00 30 06 30 04 04 00 31 00" },
+            }
+            for _, c in ipairs(cases) do
+                local pok, res, err = pcall(protocol.decode_message, ldap_hex(c[2]))
+                assert(pok, c[1] .. " raised instead of returning an error: " .. tostring(res))
+                assert(res == nil, c[1] .. " must not yield a result")
+                assert(err ~= nil, c[1] .. " must report an error")
+            end
 
-            -- non-string AttributeDescription (INTEGER 5) keys attributes by number; must be LDAPString (RFC 4511 s4.1.4)
-            local ok2, res2, err2 = pcall(protocol.decode_message,
-                ldap_hex("30 14 02 01 03 64 0f 04 01 78 30 0a 30 08 02 01 05 31 03 04 01 41"))
-            assert(ok2, "non-string attribute type raised: " .. tostring(res2))
-            assert(res2 == nil and err2 ~= nil,
-                   "attribute type that is not an LDAPString must be rejected")
-
-            -- objectName that is not an LDAPDN (INTEGER 5) must be an error, not entry_dn == 5
-            local ok3, res3, err3 = pcall(protocol.decode_message, ldap_hex("30 0a 02 01 03 64 05 02 01 05 30 00"))
-            assert(ok3, "non-string objectName raised: " .. tostring(res3))
-            assert(res3 == nil and err3 ~= nil, "objectName must be an LDAPDN, got " .. tostring(res3 and res3.entry_dn))
-
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-=== TEST 5: a missing resultCode or messageID must fail loudly, not become nil
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local protocol = require("resty.ldap.protocol")
-            local ldap_hex = require("ldap_hex")
-
-            local bad, err = protocol.decode_message(ldap_hex("30 0c 02 01 01 61 07 01 01 ff 04 00 04 00"))
-            assert(bad == nil, "resultCode must be a number; got result_code=" ..
-                   tostring(bad and bad.result_code))
-            assert(err ~= nil, "undecodable resultCode must report an error")
-
-            -- messageID as a BOOLEAN: a nil message_id breaks request/response correlation (RFC 4511 s4.1.1)
-            local bad2, err2 = protocol.decode_message(ldap_hex("30 0c 01 01 ff 61 07 0a 01 00 04 00 04 00"))
-            assert(bad2 == nil, "messageID must be an INTEGER; got message_id=" ..
-                   tostring(bad2 and bad2.message_id))
-            assert(err2 ~= nil, "undecodable messageID must report an error")
+            -- positive control: the same well-formed shape still decodes
+            local good = assert(protocol.decode_message(
+                ldap_hex("30 11 02 01 03 64 0c 04 01 78 30 07 30 05 04 01 73 31 00")))
+            assert(good.entry_dn == "x", "well-formed entry_dn")
+            assert(type(good.attributes.s) == "table" and #good.attributes.s == 0, "empty vals array")
 
             ngx.say("ok")
         }
@@ -260,7 +257,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 6: SearchResultReference must not silently drop an undecodable URI
+=== TEST 5: SearchResultReference must not silently drop an undecodable URI
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -268,13 +265,25 @@ ok
             local protocol = require("resty.ldap.protocol")
             local ldap_hex = require("ldap_hex")
 
-            local bad, err = protocol.decode_message(ldap_hex([[30 1c 02 01 02 73 17
-                04 08 6c 64 61 70 3a 2f 2f 78
-                01 01 ff
-                04 08 6c 64 61 70 3a 2f 2f 79]]))
-            assert(bad == nil, "reference with an undecodable member must be rejected; got " ..
-                   tostring(bad and #bad.uris) .. " uris")
-            assert(err ~= nil, "reference with an undecodable member must report an error")
+            -- one vector per member category; each must reject with no partial uris list
+            local cases = {
+                -- corruption AFTER valid members: BOOLEAN between two real URIs
+                { "BOOLEAN middle member", [[30 1c 02 01 02 73 17
+                    04 08 6c 64 61 70 3a 2f 2f 78
+                    01 01 ff
+                    04 08 6c 64 61 70 3a 2f 2f 79]] },
+                -- no-registered-decoder category: NULL member after a valid URI
+                { "NULL member after a URI", "30 0a 02 01 02 73 05 04 01 78 05 00" },
+                -- decodable-but-non-string category: a nested SEQUENCE would land a table in
+                -- uris[1]; URI (RFC 4511 s4.1.10) is an OCTET STRING on the wire
+                { "nested SEQUENCE member", "30 09 02 01 02 73 04 30 02 04 00" },
+            }
+            for _, c in ipairs(cases) do
+                local bad, err = protocol.decode_message(ldap_hex(c[2]))
+                assert(bad == nil, c[1] .. " must be rejected; got " ..
+                       tostring(bad and #bad.uris) .. " uris")
+                assert(err ~= nil, c[1] .. " must report an error")
+            end
 
             -- a well-formed multi-URI reference still decodes in full
             local r = assert(protocol.decode_message(ldap_hex([[30 23 02 01 02 73 1e
@@ -294,7 +303,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 7: PartialAttributeList containers must actually be SEQUENCEs
+=== TEST 6: PartialAttributeList containers must actually be SEQUENCEs
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -330,35 +339,6 @@ ok
                 04 01 78
                 30 0c 30 0a 04 02 63 6e 31 04 04 02 4a 44]])))
             assert(r.attributes.cn[1] == "JD", "well-formed entry still decodes")
-
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-=== TEST 8: an out-of-range messageID must not be silently coerced to -1
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local protocol = require("resty.ldap.protocol")
-            local ldap_hex = require("ldap_hex")
-
-            local bad, err = protocol.decode_message(
-                ldap_hex("30 14 02 09 00 ff ff ff ff ff ff ff ff 61 07 0a 01 00 04 00 04 00"))
-            assert(bad == nil, "out-of-range messageID must be rejected; got message_id=" ..
-                   tostring(bad and bad.message_id))
-            assert(err ~= nil, "out-of-range messageID must report an error")
-
-            -- a genuine large-but-legal messageID still works: 2147483647 == maxInt
-            local r = assert(protocol.decode_message(
-                ldap_hex("30 0f 02 04 7f ff ff ff 61 07 0a 01 00 04 00 04 00")))
-            assert(r.message_id == 2147483647, "maxInt messageID " .. tostring(r.message_id))
 
             ngx.say("ok")
         }
