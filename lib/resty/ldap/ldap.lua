@@ -12,6 +12,15 @@ local _M = {}
 
 local ldapMessageId = 1
 
+local LDAP_MAX_INT = 2147483647
+
+local function advance_message_id()
+    ldapMessageId = ldapMessageId + 1
+    if ldapMessageId > LDAP_MAX_INT then
+        ldapMessageId = 1
+    end
+end
+
 
 local ERROR_MSG = {
     [1]  = "Initialization of LDAP library failed.",
@@ -96,7 +105,7 @@ function _M.bind_request(socket, username, password)
 
     local packet = asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 
-    ldapMessageId = ldapMessageId + 1
+    advance_message_id()
 
     local bytes, err = socket:send(packet)
     if not bytes then
@@ -151,7 +160,7 @@ end
 function _M.unbind_request(socket)
     local ldapMsg, packet
 
-    ldapMessageId = ldapMessageId + 1
+    advance_message_id()
 
     ldapMsg = asn1_encode(ldapMessageId) ..
                 asn1_put_object(APPNO.UnbindRequest, asn1.CLASS.APPLICATION, 0)
@@ -170,7 +179,7 @@ end
 function _M.start_tls(socket)
     local method_name = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, "1.3.6.1.4.1.1466.20037")
 
-    ldapMessageId = ldapMessageId + 1
+    advance_message_id()
 
     local ldapMsg = asn1_encode(ldapMessageId) ..
                 asn1_put_object(APPNO.ExtendedRequest, asn1.CLASS.APPLICATION, 1, method_name)

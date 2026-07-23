@@ -11,6 +11,8 @@ local _M = {}
 
 local ldapMessageId = 1
 
+local LDAP_MAX_INT = 2147483647
+
 _M.ERROR_MSG = {
     [1]  = "Initialization of LDAP library failed",
     [4]  = "Size limit exceeded",
@@ -39,6 +41,9 @@ local function ldap_message(app_no, req)
         asn1_put_object(app_no, asn1.CLASS.APPLICATION, 1, req)
 
     ldapMessageId = ldapMessageId + 1
+    if ldapMessageId > LDAP_MAX_INT then
+        ldapMessageId = 1
+    end
 
     return ldapMsg
 end

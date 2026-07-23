@@ -153,3 +153,43 @@ GET /t
 ok
 --- error_log
 attempt to send data on a closed socket
+
+=== TEST 5: releasing a bound session closes the socket instead of pooling it
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+            local protocol = require("resty.ldap.protocol")
+
+            -- prime the pool so the pinned checkout below is observably reused
+            local c = ldap_client:new("127.0.0.1", 1389)
+            assert(c:search("dc=example,dc=org",
+                protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)"))
+
+            assert(c:connect())
+            assert(c.socket:getreusedtimes() >= 1, "pinned checkout should hit the pool")
+            assert(c:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
+            assert(c:set_keepalive()) -- bound: must close, not pool
+
+            -- a new anonymous client must get a fresh connection; its search
+            -- must not inherit the admin identity
+            local d = ldap_client:new("127.0.0.1", 1389)
+            assert(d:connect())
+            assert(d.socket:getreusedtimes() == 0,
+                   "admin-bound socket leaked into the pool")
+            local res, serr = d:search("dc=example,dc=org",
+                protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
+            assert(res, "anonymous search: " .. tostring(serr))
+            assert(#res == 1 and res[1].entry_dn == "dc=example,dc=org", "base entry")
+            assert(d:set_keepalive())
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]

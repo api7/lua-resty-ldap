@@ -9,7 +9,7 @@ repeat_each(1);
 plan 'no_plan';
 
 our $HttpConfig = <<'_EOC_';
-    lua_package_path 'lib/?.lua;/usr/share/lua/5.1/?.lua;;';
+    lua_package_path 'lib/?.lua;t/lib/?.lua;/usr/share/lua/5.1/?.lua;;';
     lua_package_cpath 'deps/lib/lua/5.1/?.so;;';
     resolver 127.0.0.53;
 _EOC_
@@ -304,6 +304,39 @@ ok
             local ok4, res, err4 = pcall(protocol.simple_bind_request, {}, "s3cret")
             assert(ok4, "table dn raised a raw Lua error: " .. tostring(res))
             assert(res == nil and err4 ~= nil, "table dn should return nil, err")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+=== TEST 7: the message ID wraps back to 1 past RFC 4511 maxInt
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local protocol = require("resty.ldap.protocol")
+            local upvalue = require("upvalue")
+            local message_id_of = require("ldap_msgid")
+
+            -- the counter is module-private; reach it through the upvalue
+            -- chain simple_bind_request -> ldap_message -> ldapMessageId
+            local ldap_message = assert(
+                upvalue.get(protocol.simple_bind_request, "ldap_message"),
+                "ldap_message upvalue not found")
+            assert(upvalue.set(ldap_message, "ldapMessageId", 2147483647))
+
+            local at_max = assert(protocol.simple_bind_request("cn=x", "pw"))
+            assert(message_id_of(at_max) == 2147483647,
+                   "the request at maxInt itself is legal")
+            local wrapped = assert(protocol.simple_bind_request("cn=x", "pw"))
+            local id = message_id_of(wrapped)
+            assert(id == 1, "id must wrap to 1 past maxInt, got " .. tostring(id))
 
             ngx.say("ok")
         }

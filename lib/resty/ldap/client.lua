@@ -178,17 +178,19 @@ local function _reset_socket(cli)
     local sock = cli.socket
     cli.socket = nil
     cli.pinned = nil
+    cli.bound = nil
     if sock then
         sock:close()
     end
 end
 
-local function _send_recieve(cli, request, multi_resp_hint)
+local function _send_receive(cli, request, multi_resp_hint)
     -- In a pinned session the socket is already checked out; otherwise check out
     -- one for this single operation.
     if not cli.pinned then
         local err = _init_socket(cli)
         if err then
+            cli.bound = nil
             return nil, fmt("initialize socket failed: %s", err)
         end
     end
@@ -264,9 +266,15 @@ local function _send_recieve(cli, request, multi_resp_hint)
     end
 
     -- single-shot ops return the socket to the pool; a pinned session is
-    -- released explicitly by the caller
+    -- released explicitly by the caller. A bound socket carries the Bind
+    -- identity while the pool key does not, so close it instead of pooling.
     if not cli.pinned then
-        socket:setkeepalive(cli.socket_config.keepalive_timeout)
+        if cli.bound then
+            cli.bound = nil
+            socket:close()
+        else
+            socket:setkeepalive(cli.socket_config.keepalive_timeout)
+        end
     end
 
     return multi_resp_hint and result or result[1]
@@ -326,12 +334,17 @@ function _M.set_keepalive(self)
     if not sock then
         return true
     end
+    if self.bound then
+        self.bound = nil
+        return sock:close()
+    end
     return sock:setkeepalive(self.socket_config.keepalive_timeout)
 end
 
 
 function _M.close(self)
     self.pinned = nil
+    self.bound = nil
     local sock = self.socket
     self.socket = nil
     if not sock then
@@ -343,13 +356,14 @@ end
 
 function _M.simple_bind(self, dn, password)
     -- bind to a local first: as the last call argument a (nil, err) return would
-    -- expand into _send_recieve's multi_resp_hint and send a nil request
+    -- expand into _send_receive's multi_resp_hint and send a nil request
     local req, berr = protocol.simple_bind_request(dn, password)
     if not req then
         return false, berr
     end
 
-    local res, err = _send_recieve(self, req)
+    self.bound = true
+    local res, err = _send_receive(self, req)
     if not res then
         return false, err
     end
@@ -388,7 +402,7 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
         return false, err
     end
 
-    local res, err = _send_recieve(self, search_req, true) -- mark as potential multi-response operation
+    local res, err = _send_receive(self, search_req, true) -- mark as potential multi-response operation
     if not res then
         return false, err
     end

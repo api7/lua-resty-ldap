@@ -288,3 +288,93 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+
+
+=== TEST 11: a single-shot bind never returns its socket to the shared pool
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+            local protocol = require("resty.ldap.protocol")
+
+            -- control: an unbound single-shot search does re-enter the pool
+            local a = ldap_client:new("127.0.0.1", 1389)
+            assert(a:search("dc=example,dc=org",
+                protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)"))
+            local b = ldap_client:new("127.0.0.1", 1389)
+            assert(b:connect())
+            assert(b.socket:getreusedtimes() > 0, "unbound search should hit the pool")
+            assert(b:set_keepalive())
+
+            -- a single-shot admin bind checks out the pooled socket, binds on
+            -- it, and must close it on release instead of pooling it again
+            local c = ldap_client:new("127.0.0.1", 1389)
+            assert(c:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
+
+            -- a new anonymous client must get a fresh connection; its search
+            -- must not inherit the admin identity
+            local d = ldap_client:new("127.0.0.1", 1389)
+            assert(d:connect())
+            assert(d.socket:getreusedtimes() == 0,
+                   "admin-bound socket leaked into the pool")
+            local res, serr = d:search("dc=example,dc=org",
+                protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
+            assert(res, "anonymous search: " .. tostring(serr))
+            assert(#res == 1, "one entry")
+            assert(d:set_keepalive())
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+
+
+=== TEST 12: ldap_authenticate never pools the socket of a successful bind
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap = require("resty.ldap")
+            local conf = {
+                ldap_host = "127.0.0.1",
+                ldap_port = 1389,
+                base_dn   = "ou=users,dc=example,dc=org",
+                attribute = "cn",
+            }
+
+            -- control: a failed bind leaves the session anonymous (RFC 4513 s4),
+            -- so its socket is pooled, observable on the default host:port pool
+            local ok = ldap.ldap_authenticate("user01", "wrong-password", conf)
+            assert(ok == false, "a wrong password must fail")
+            local probe = ngx.socket.tcp()
+            assert(probe:connect("127.0.0.1", 1389))
+            assert(probe:getreusedtimes() > 0, "failed-bind socket should be pooled")
+            probe:close()
+
+            -- a successful bind leaves the socket holding the user's identity,
+            -- so it must be closed, never pooled
+            local ok2, err2 = ldap.ldap_authenticate("user01", "password1", conf)
+            assert(ok2, "authenticate failed: " .. tostring(err2))
+            local probe2 = ngx.socket.tcp()
+            assert(probe2:connect("127.0.0.1", 1389))
+            assert(probe2:getreusedtimes() == 0,
+                   "user-bound socket leaked into the pool")
+            probe2:close()
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]

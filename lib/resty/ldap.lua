@@ -139,10 +139,14 @@ function _M.ldap_authenticate(given_username, given_password, conf)
         return nil, err
     end
 
-    ok, suppressed_err = sock:setkeepalive(conf.keepalive)
-    if not ok then
-        log(ERR, "failed to keepalive to ", conf.ldap_host, ":",
-                 tostring(conf.ldap_port), ": ", suppressed_err)
+    if is_authenticated then
+        sock:close()
+    else
+        ok, suppressed_err = sock:setkeepalive(conf.keepalive)
+        if not ok then
+            log(ERR, "failed to keepalive to ", conf.ldap_host, ":",
+                     tostring(conf.ldap_port), ": ", suppressed_err)
+        end
     end
 
     -- who: the canonical escaped bind DN, for callers that key identity on it

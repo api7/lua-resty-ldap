@@ -588,6 +588,9 @@ GET /t
 
             local client = ldap_client:new("127.0.0.1", 1389)
 
+            -- pin the session so the modify runs on the bound connection
+            assert(client:connect())
+
             -- auth
             local res, err = client:simple_bind("cn=admin,dc=example,dc=org", "adminpassword")
             if not res then
@@ -609,6 +612,8 @@ GET /t
 
             assert(res.protocol_op == 7, "protocol_op is not equal to 7, " .. res.protocol_op)
             assert(res.result_code == 0, "result_code is not equal to 0, " .. res.result_code)
+
+            client:close()
         }
     }
 --- request
@@ -662,6 +667,9 @@ GET /t
 
             local client = ldap_client:new("127.0.0.1", 1389)
 
+            -- pin the session so the modify runs on the bound connection
+            assert(client:connect())
+
             -- auth
             local res, err = client:simple_bind("cn=admin,dc=example,dc=org", "adminpassword")
             if not res then
@@ -683,6 +691,8 @@ GET /t
 
             assert(res.protocol_op == 7, "protocol_op is not equal to 7, " .. res.protocol_op)
             assert(res.result_code == 0, "result_code is not equal to 0, " .. res.result_code)
+
+            client:close()
         }
     }
 --- request

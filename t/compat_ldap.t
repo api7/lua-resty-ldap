@@ -7,7 +7,7 @@ repeat_each(1);
 plan 'no_plan';
 
 our $HttpConfig = <<'_EOC_';
-    lua_package_path 'lib/?.lua;/usr/share/lua/5.1/?.lua;;';
+    lua_package_path 'lib/?.lua;t/lib/?.lua;/usr/share/lua/5.1/?.lua;;';
     lua_package_cpath 'deps/lib/lua/5.1/?.so;;';
     resolver 127.0.0.53;
 _EOC_
@@ -319,3 +319,44 @@ GET /t
 ok
 --- error_log
 certificate verify error
+
+
+
+=== TEST 11: bind_request message IDs wrap back to 1 past RFC 4511 maxInt
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap = require("resty.ldap.ldap")
+            local upvalue = require("upvalue")
+            local message_id_of = require("ldap_msgid")
+
+            -- the counter is module-private; set it through bind_request's
+            -- upvalue cell, which all three request builders share
+            assert(upvalue.set(ldap.bind_request, "ldapMessageId", 2147483647))
+
+            local sent
+            local sock = {
+                send    = function(_, p) sent = p return #p end,
+                receive = function() return nil, "closed" end,
+                close   = function() return true end,
+            }
+
+            -- the mock cuts the response off, but the request is sent (and the
+            -- counter advanced) before the receive
+            ldap.bind_request(sock, "cn=x,dc=example,dc=org", "pw")
+            assert(message_id_of(sent) == 2147483647,
+                   "the request at maxInt itself is legal")
+            ldap.bind_request(sock, "cn=x,dc=example,dc=org", "pw")
+            local id = message_id_of(sent)
+            assert(id == 1, "id must wrap to 1 past maxInt, got " .. tostring(id))
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
