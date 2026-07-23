@@ -1,36 +1,44 @@
 local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
-local to_hex   = require("resty.string").to_hex
-local ok, rasn = pcall(require, "rasn")
-
-if not ok then
-    error("failed to load rasn library: " .. rasn)
-end
 
 local tostring     = tostring
 local fmt          = string.format
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
-local string_char  = string.char
-local rasn_decode  = rasn.decode_ldap
+local decode_ldap  = protocol.decode_message
+
+-- Upper bound on a single LDAP message body (bytes). A well-formed length such
+-- as 84 7f ff ff ff is legal BER but would force a multi-GiB allocation in the
+-- worker. 16 MiB comfortably exceeds any real entry.
+local MAX_LDAP_MESSAGE_SIZE = 16 * 1024 * 1024
 
 
 local _M = {}
 local mt = { __index = _M }
 
+-- returns body length + header bytes, or nil + error (length is validated)
 local function calculate_payload_length(encStr, pos, socket)
     local elen
 
     pos, elen = bunpack(encStr, "C", pos)
+
+    -- 0x80 (indefinite) and 0xff (reserved) are illegal, not short-form lengths
+    if elen == 0x80 or elen == 0xff then
+        return nil, nil, "invalid BER length: indefinite or reserved form"
+    end
 
     if elen > 128 then
         elen = elen - 128
         local elenCalc = 0
         local elenNext
 
-        for i = 1, elen do
+        for _ = 1, elen do
             elenCalc = elenCalc * 256
-            encStr = encStr .. socket:receive(1)
+            local byte, err = socket:receive(1)
+            if not byte then
+                return nil, nil, fmt("receive length header failed: %s", err)
+            end
+            encStr = encStr .. byte
             pos, elenNext = bunpack(encStr, "C", pos)
             elenCalc = elenCalc + elenNext
         end
@@ -38,7 +46,11 @@ local function calculate_payload_length(encStr, pos, socket)
         elen = elenCalc
     end
 
-    return pos, elen, encStr
+    if elen > MAX_LDAP_MESSAGE_SIZE then
+        return nil, nil, fmt("ldap message too large: %d bytes", elen)
+    end
+
+    return elen, encStr
 end
 
 local function _start_tls(sock)
@@ -56,7 +68,11 @@ local function _start_tls(sock)
         end
         return fmt("receive response header failed: %s", err)
     end
-    local _, packet_len, packet_header = calculate_payload_length(len, 2, sock)
+    local packet_len, packet_header, lerr = calculate_payload_length(len, 2, sock)
+    if not packet_len then
+        sock:close()
+        return lerr
+    end
 
     local packet, err = sock:receive(packet_len)
     if not packet then
@@ -65,16 +81,16 @@ local function _start_tls(sock)
     end
 
     local packet = packet_header .. packet
-    local ok, res, err = pcall(rasn_decode, packet)
-    if not ok or err then
-        return nil, fmt(
-            "failed to decode ldap message: %s, message: %s",
-            not ok and res or err, -- error returned in second value by pcall
-            to_hex(packet)
-        )
+    local res, err = decode_ldap(packet)
+    if not res then
+        sock:close()
+        -- the body can carry DNs and attribute values; keep it out of the error
+        return fmt("failed to decode ldap message: %s (%d bytes)",
+                   err or "unknown", #packet)
     end
 
     if res.protocol_op ~= protocol.APP_NO.ExtendedResponse then
+        sock:close()
         return fmt("received incorrect op in packet: %d, expected %d",
                     res.protocol_op, protocol.APP_NO.ExtendedResponse)
     end
@@ -82,6 +98,7 @@ local function _start_tls(sock)
     if res.result_code ~= 0 then
         local error_msg = protocol.ERROR_MSG[res.result_code]
 
+        sock:close()
         return fmt("error: %s, details: %s",
                     error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
                     res.diagnostic_msg or "")
@@ -96,16 +113,28 @@ local function _init_socket(self)
 
     sock:settimeout(socket_config.socket_timeout)
 
-    -- keep TLS connections in a separate pool to avoid reusing non-secure
-    -- connections and vice-versa, because STARTTLS use the same port
+    -- Partition the pool by transport mode and verification policy:
+    -- sslhandshake() returns immediately on a reused connection, so a pooled
+    -- ssl_verify=false connection must never serve one that demands verification.
+    local pool_suffix = ""
+    if socket_config.start_tls then
+        pool_suffix = ":starttls"
+    elseif socket_config.ldaps then
+        pool_suffix = ":ldaps"
+    end
+    if pool_suffix ~= "" then
+        pool_suffix = pool_suffix .. (socket_config.ssl_verify and ":verify" or ":noverify")
+    end
+
     local opts = {
-        pool = host .. ":" .. port .. (socket_config.start_tls and ":starttls" or ""),
+        pool = host .. ":" .. port .. pool_suffix,
         pool_size = socket_config.keepalive_pool_size,
     }
 
-    -- override the value when the user specifies connection pool name
+    -- override the value when the user specifies connection pool name,
+    -- still partitioned by policy
     if socket_config.keepalive_pool_name and socket_config.keepalive_pool_name ~= "" then
-        opts.pool = socket_config.keepalive_pool_name
+        opts.pool = socket_config.keepalive_pool_name .. pool_suffix
     end
 
     local ok, err = sock:connect(host, port, opts)
@@ -133,6 +162,7 @@ local function _init_socket(self)
     end
 
     if socket_config.start_tls or socket_config.ldaps then
+        local _
         _, err = sock:sslhandshake(true, host, socket_config.ssl_verify)
         if err ~= nil then
             return fmt("do TLS handshake on %s:%s failed: %s",
@@ -143,11 +173,26 @@ local function _init_socket(self)
     self.socket = sock
 end
 
-local function _send_recieve(cli, request, multi_resp_hint)
-    -- initialize socket
-    local err = _init_socket(cli)
-    if err then
-        return nil, fmt("initialize socket failed: %s", err)
+-- drop the socket (and its pin) after an unrecoverable error
+local function _reset_socket(cli)
+    local sock = cli.socket
+    cli.socket = nil
+    cli.pinned = nil
+    cli.bound = nil
+    if sock then
+        sock:close()
+    end
+end
+
+local function _send_receive(cli, request, multi_resp_hint)
+    -- In a pinned session the socket is already checked out; otherwise check out
+    -- one for this single operation.
+    if not cli.pinned then
+        local err = _init_socket(cli)
+        if err then
+            cli.bound = nil
+            return nil, fmt("initialize socket failed: %s", err)
+        end
     end
 
     local socket = cli.socket
@@ -155,12 +200,9 @@ local function _send_recieve(cli, request, multi_resp_hint)
     -- send req
     local bytes, err = cli.socket:send(request)
     if not bytes then
+        _reset_socket(cli)
         return nil, fmt("send request failed: %s", err)
     end
-
-    -- Each response in a multi-response body has ASCII NULL(0x00) as its ending,
-    -- so here the reader is created using receiveuntil.
-    local reader = socket:receiveuntil(string_char(0x00))
 
     local result = {}
     -- When the client sends a search request, the server will return several
@@ -171,15 +213,20 @@ local function _send_recieve(cli, request, multi_resp_hint)
         -- Takes the packet header of a single request body, which has a length
         -- of two bytes, where the second byte is the length of this response
         -- body packet.
-        local len, err = reader(2)
+        local len, err = socket:receive(2)
         if not len then
             if err == "timeout" then
-                socket:close()
+                _reset_socket(cli)
                 return nil, fmt("receive response failed: %s", err)
             end
             break -- read done, data has been taken to the end
         end
-        local _, packet_len, packet_header = calculate_payload_length(len, 2, socket)
+
+        local packet_len, packet_header, lerr = calculate_payload_length(len, 2, socket)
+        if not packet_len then
+            _reset_socket(cli)
+            return nil, lerr
+        end
 
         -- Get the data of the specified length
         local packet, err = socket:receive(packet_len)
@@ -187,18 +234,17 @@ local function _send_recieve(cli, request, multi_resp_hint)
             -- When the packet header is read but the packet body cannot be read,
             -- this error is considered unacceptable and therefore an error is
             -- returned directly instead of processing the received data.
-            socket:close()
-            return nil, err
+            _reset_socket(cli)
+            return nil, fmt("receive response failed: %s", err)
         end
 
         local packet = packet_header .. packet
-        local ok, res, err = pcall(rasn_decode, packet)
-        if not ok or err then
-            return nil, fmt(
-                "failed to decode ldap message: %s, message: %s",
-                not ok and res or err, -- error returned in second value by pcall
-                to_hex(packet)
-            )
+        local res, err = decode_ldap(packet)
+        if not res then
+            -- the body can carry DNs and attribute values; keep it out of the error
+            _reset_socket(cli)
+            return nil, fmt("failed to decode ldap message: %s (%d bytes)",
+                            err or "unknown", #packet)
         end
 
         table_insert(result, res)
@@ -219,8 +265,17 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
     end
 
-    -- put back into the connection pool
-    socket:setkeepalive(cli.socket_config.keepalive_timeout)
+    -- single-shot ops return the socket to the pool; a pinned session is
+    -- released explicitly by the caller. A bound socket carries the Bind
+    -- identity while the pool key does not, so close it instead of pooling.
+    if not cli.pinned then
+        if cli.bound then
+            cli.bound = nil
+            socket:close()
+        else
+            socket:setkeepalive(cli.socket_config.keepalive_timeout)
+        end
+    end
 
     return multi_resp_hint and result or result[1]
 end
@@ -256,10 +311,63 @@ function _M.new(_, host, port, client_config)
 end
 
 
+function _M.connect(self)
+    if self.pinned then
+        return true
+    end
+    local err = _init_socket(self)
+    if err then
+        return nil, err
+    end
+    self.pinned = true
+    return true
+end
+
+
+function _M.set_keepalive(self)
+    if not self.pinned then
+        return true
+    end
+    self.pinned = nil
+    local sock = self.socket
+    self.socket = nil
+    if not sock then
+        return true
+    end
+    if self.bound then
+        self.bound = nil
+        return sock:close()
+    end
+    return sock:setkeepalive(self.socket_config.keepalive_timeout)
+end
+
+
+function _M.close(self)
+    self.pinned = nil
+    self.bound = nil
+    local sock = self.socket
+    self.socket = nil
+    if not sock then
+        return true
+    end
+    return sock:close()
+end
+
+
 function _M.simple_bind(self, dn, password)
-    local res, err = _send_recieve(self, protocol.simple_bind_request(dn, password))
+    -- bind to a local first: as the last call argument a (nil, err) return would
+    -- expand into _send_receive's multi_resp_hint and send a nil request
+    local req, berr = protocol.simple_bind_request(dn, password)
+    if not req then
+        return false, berr
+    end
+
+    self.bound = true
+    local res, err = _send_receive(self, req)
     if not res then
-        return false, err
+        -- transport/decode failure: nil, so callers can tell an unreachable
+        -- or broken server (nil) from rejected credentials (false)
+        return nil, err
     end
 
     if res.protocol_op ~= protocol.APP_NO.BindResponse then
@@ -296,7 +404,7 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
         return false, err
     end
 
-    local res, err = _send_recieve(self, search_req, true) -- mark as potential multi-response operation
+    local res, err = _send_receive(self, search_req, true) -- mark as potential multi-response operation
     if not res then
         return false, err
     end

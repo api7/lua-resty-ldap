@@ -190,4 +190,31 @@ function _M.compile(str)
 end
 
 
+local ESCAPE_MAP = {
+    ["\0"] = "\\00",
+    ["*"]  = "\\2a",
+    ["("]  = "\\28",
+    [")"]  = "\\29",
+    ["\\"] = "\\5c",
+    ["="]  = "\\3d",
+    ["<"]  = "\\3c",
+    [">"]  = "\\3e",
+}
+
+-- RFC 4515 s3: escape the octets that are special in an assertion value so that
+-- untrusted input cannot change the filter's structure. The compiler un-escapes
+-- \HH back to raw bytes, so escape() is its exact inverse for these octets.
+-- The five RFC-mandated specials are `* ( ) \ NUL`; `= < >` are not RFC-special
+-- but the grammar above is stricter and rejects them raw inside a value, so we
+-- escape them too (escaping any octet is RFC-legal and round-trips). Note: valid
+-- multi-byte UTF-8 passes through the grammar unescaped; a lone invalid-UTF-8
+-- byte (0x80-0xFF) is not escaped here and fails the filter closed.
+function _M.escape(value)
+    if type(value) ~= "string" then
+        return nil, "value must be a string"
+    end
+    return (value:gsub("[%z%*%(%)\\=<>]", ESCAPE_MAP))
+end
+
+
 return _M

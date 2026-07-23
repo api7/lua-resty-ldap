@@ -1,0 +1,9 @@
+dn: cn=Jane Doe,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+cn: Jane Doe
+sn: Doe
+uid: jdoe
+userPassword: janesecret
+description:: AQAC

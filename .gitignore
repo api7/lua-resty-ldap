@@ -1,8 +1,5 @@
 # dev
 t/servroot
 
-
-# Added by cargo
-
-/target
-/Cargo.lock
+# luarocks --tree ./deps build output (see .github/workflows/ci.yml)
+deps/

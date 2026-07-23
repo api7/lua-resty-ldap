@@ -1,11 +1,12 @@
 package = "lua-resty-ldap"
-version = "local-0"
+version = "0.3.0-0"
 source = {
-   url = "file://."
+   url = "git+https://github.com/api7/lua-resty-ldap",
+   tag = "v0.3.0"
 }
 
 description = {
-   summary = "Nonblocking Lua ldap driver library for OpenResty",
+   summary = "Nonblocking Lua LDAP driver library for OpenResty",
    homepage = "https://github.com/api7/lua-resty-ldap",
    license = "Apache License 2.0",
    maintainer = "Yuansheng Wang <membphis@gmail.com>"

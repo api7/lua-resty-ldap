@@ -115,7 +115,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 1, "result length is not equal to 1")
+            -- 2 entries: the image seeds ou=users and ou=groups below the base
+            assert(#res == 2, "result length is not equal to 2")
             assert(res[1].entry_dn == "ou=users,dc=example,dc=org", "result 1 entry_dn is not equal to ou=users,dc=example,dc=org")
         }
     }
@@ -369,7 +370,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 1, "result length is not equal to 1")
+            -- 2 entries: the base entry plus cn=Jane Doe from t/fixtures/ad.ldif
+            assert(#res == 2, "result length is not equal to 2")
             assert(res[1].entry_dn == "dc=example,dc=org", "result entry_dn is not equal to dc=example,dc=org")
         }
     }
@@ -531,7 +533,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 5, "result length is not equal to 5")
+            -- 7 entries: 6 bootstrapped by the image plus cn=Jane Doe from t/fixtures/ad.ldif
+            assert(#res == 7, "result length is not equal to 7")
         }
     }
 --- request
@@ -585,6 +588,9 @@ GET /t
 
             local client = ldap_client:new("127.0.0.1", 1389)
 
+            -- pin the session so the modify runs on the bound connection
+            assert(client:connect())
+
             -- auth
             local res, err = client:simple_bind("cn=admin,dc=example,dc=org", "adminpassword")
             if not res then
@@ -606,6 +612,8 @@ GET /t
 
             assert(res.protocol_op == 7, "protocol_op is not equal to 7, " .. res.protocol_op)
             assert(res.result_code == 0, "result_code is not equal to 0, " .. res.result_code)
+
+            client:close()
         }
     }
 --- request
@@ -659,6 +667,9 @@ GET /t
 
             local client = ldap_client:new("127.0.0.1", 1389)
 
+            -- pin the session so the modify runs on the bound connection
+            assert(client:connect())
+
             -- auth
             local res, err = client:simple_bind("cn=admin,dc=example,dc=org", "adminpassword")
             if not res then
@@ -680,6 +691,8 @@ GET /t
 
             assert(res.protocol_op == 7, "protocol_op is not equal to 7, " .. res.protocol_op)
             assert(res.result_code == 0, "result_code is not equal to 0, " .. res.result_code)
+
+            client:close()
         }
     }
 --- request
