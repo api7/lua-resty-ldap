@@ -20,7 +20,6 @@ build = {
    type = "builtin",
    modules = {
       ["resty.ldap"]          = "lib/resty/ldap.lua",
-      ["resty.ldap.ldap"]     = "lib/resty/ldap/ldap.lua",
       ["resty.ldap.asn1"]     = "lib/resty/ldap/asn1.lua",
       ["resty.ldap.filter"]   = "lib/resty/ldap/filter.lua",
       ["resty.ldap.protocol"] = "lib/resty/ldap/protocol.lua",

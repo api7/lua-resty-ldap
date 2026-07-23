@@ -63,7 +63,7 @@ To load this module:
 
 `bind_dn` and `password` can be `nil` values, that means the client is instructed to do anonymous bind.
 
-`res` is a boolean type value that will be true when authentication is successful, when it is false, `err` will contain errors.
+`res` is `true` when authentication succeeds and `false` when the server rejects the bind (or the request cannot be encoded); on a transport or decoding failure `res` is `nil`. In both failure cases `err` carries the error.
 
 #### search
 
@@ -107,7 +107,7 @@ Closes a pinned connection without returning it to the pool.
 
 ### resty.ldap
 
-Compatibility entrypoint kept for APISIX's `ldap-auth` plugin (restored from v0.1.0). New code should use `resty.ldap.client` instead.
+Compatibility entrypoint kept for APISIX's `ldap-auth` plugin, preserving the v0.1.0 `ldap_authenticate` contract as a thin wrapper over `resty.ldap.client`. New code should use `resty.ldap.client` instead.
 
 ```lua
     local ldap = require "resty.ldap"
@@ -117,7 +117,7 @@ Compatibility entrypoint kept for APISIX's `ldap-auth` plugin (restored from v0.
 
 **syntax:** *ok, err, user_dn = ldap.ldap_authenticate(username, password, conf)*
 
-Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds; otherwise `ok` is `false` or `nil` and `err` carries the error.
+Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds, `false` when the server rejects the credentials, and `nil` on a connect/TLS/transport failure; in both failure cases `err` carries the error. The connection is always closed after the bind attempt — a socket that carried a Bind is never returned to the pool.
 
 `username` is escaped per RFC 4514 when the bind DN is built, so DN metacharacters (`, + " \ < > ; =`, a leading space or `#`, a trailing space, or a NUL) are treated as literal characters of the RDN value instead of injecting extra RDN components. Any username string is accepted, as in v0.1.0.
 
@@ -130,7 +130,7 @@ Binds against the directory as `<attribute>=<username>,<base_dn>` with the given
 | `ldap_host`           | string       | localhost  | LDAP server host. |
 | `ldap_port`           | number       | 389        | LDAP server port. |
 | `timeout`             | number       | 10000      | Socket timeout in milliseconds. |
-| `keepalive`           | number       | 60000      | Connection pool keepalive in milliseconds. |
+| `keepalive`           | number       | 60000      | Accepted for v0.1.0 compatibility, but unused: sockets that carried a bind are always closed, never pooled. |
 | `start_tls`           | boolean      | false      | Issue the StartTLS extended operation before binding. |
 | `ldaps`               | boolean      | false      | Connect using LDAP over TLS. |
 | `tls_verify`          | boolean      | false      | Verify the server certificate during the TLS handshake. This is the key APISIX's `ldap-auth` passes. |
@@ -138,6 +138,3 @@ Binds against the directory as `<attribute>=<username>,<base_dn>` with the given
 | `base_dn`             | string       | ou=users,dc=example,dc=org | Base DN the username is appended to. |
 | `attribute`           | string       | cn         | RDN attribute the username is bound as. |
 
-### resty.ldap.ldap
-
-Low-level compatibility module used by `resty.ldap` (restored from v0.1.0): `bind_request`, `unbind_request` and `start_tls` over a caller-supplied cosocket. New code should use `resty.ldap.client` instead.

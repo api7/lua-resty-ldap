@@ -365,7 +365,9 @@ function _M.simple_bind(self, dn, password)
     self.bound = true
     local res, err = _send_receive(self, req)
     if not res then
-        return false, err
+        -- transport/decode failure: nil, so callers can tell an unreachable
+        -- or broken server (nil) from rejected credentials (false)
+        return nil, err
     end
 
     if res.protocol_op ~= protocol.APP_NO.BindResponse then

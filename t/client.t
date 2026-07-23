@@ -275,7 +275,8 @@ ok
 
             local res, err = client:simple_bind(
                 "cn=user01,ou=users,dc=example,dc=org", "password1")
-            assert(res == false, "a 0x00 header byte must fail, got " .. tostring(res))
+            assert(res == nil, "a 0x00 header byte must be a transport failure (nil), got " ..
+                               tostring(res))
             assert(err:find("failed to decode ldap message", 1, true),
                    "unexpected err: " .. tostring(err))
             assert(closed, "the unusable socket must be closed")
@@ -337,7 +338,7 @@ ok
 
 
 
-=== TEST 12: ldap_authenticate never pools the socket of a successful bind
+=== TEST 12: ldap_authenticate never pools a socket that carried a bind
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -350,17 +351,18 @@ ok
                 attribute = "cn",
             }
 
-            -- control: a failed bind leaves the session anonymous (RFC 4513 s4),
-            -- so its socket is pooled, observable on the default host:port pool
+            -- a failed bind closes its socket instead of pooling it; the pool
+            -- is observable as the default host:port pool
             local ok = ldap.ldap_authenticate("user01", "wrong-password", conf)
-            assert(ok == false, "a wrong password must fail")
+            assert(ok == false, "a wrong password must be rejected (false), got " .. tostring(ok))
             local probe = ngx.socket.tcp()
             assert(probe:connect("127.0.0.1", 1389))
-            assert(probe:getreusedtimes() > 0, "failed-bind socket should be pooled")
+            assert(probe:getreusedtimes() == 0,
+                   "failed-bind socket leaked into the pool")
             probe:close()
 
             -- a successful bind leaves the socket holding the user's identity,
-            -- so it must be closed, never pooled
+            -- so it too must be closed, never pooled
             local ok2, err2 = ldap.ldap_authenticate("user01", "password1", conf)
             assert(ok2, "authenticate failed: " .. tostring(err2))
             local probe2 = ngx.socket.tcp()
@@ -369,6 +371,86 @@ ok
                    "user-bound socket leaked into the pool")
             probe2:close()
 
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+
+
+=== TEST 13: client returns a controlled error when the response header is unreadable
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+
+            local closed = false
+            local sock = {
+                send    = function(_, p) return #p end,
+                receive = function() return nil, "timeout" end,
+                close   = function() closed = true return true end,
+            }
+
+            local client = ldap_client:new("127.0.0.1", 1389)
+            client.socket = sock
+            client.pinned = true
+
+            local res, err = client:simple_bind(
+                "cn=user01,ou=users,dc=example,dc=org", "password1")
+            assert(res == nil, "a receive timeout must be a transport failure (nil), got " ..
+                               tostring(res))
+            assert(err:find("receive response failed", 1, true),
+                   "unexpected err: " .. tostring(err))
+            assert(closed, "the unusable socket must be closed")
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+
+
+=== TEST 14: client returns a controlled error when the response body is truncated
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+
+            local closed, step = false, 0
+            local sock = {
+                send    = function(_, p) return #p end,
+                receive = function()
+                    step = step + 1
+                    if step == 1 then
+                        return "\48\05" -- header: SEQUENCE tag, body length 5
+                    end
+                    return nil, "closed" -- body read fails
+                end,
+                close   = function() closed = true return true end,
+            }
+
+            local client = ldap_client:new("127.0.0.1", 1389)
+            client.socket = sock
+            client.pinned = true
+
+            local res, err = client:simple_bind(
+                "cn=user01,ou=users,dc=example,dc=org", "password1")
+            assert(res == nil, "a truncated body must be a transport failure (nil), got " ..
+                               tostring(res))
+            assert(err:find("receive response failed", 1, true),
+                   "unexpected err: " .. tostring(err))
+            assert(closed, "the unusable socket must be closed")
             ngx.say("ok")
         }
     }

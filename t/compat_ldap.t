@@ -31,8 +31,9 @@ __DATA__
                 base_dn    = "ou=users,dc=example,dc=org",
                 attribute  = "cn",
             })
-            assert(ok == false, "verification should have failed the handshake")
-            assert(err:find("SSL handshake", 1, true), "unexpected err: " .. tostring(err))
+            assert(ok == nil, "a rejected handshake must be a transport failure (nil), got " ..
+                              tostring(ok))
+            assert(err:find("TLS handshake", 1, true), "unexpected err: " .. tostring(err))
             ngx.say("ok")
         }
     }
@@ -86,8 +87,9 @@ ok
                 base_dn          = "ou=users,dc=example,dc=org",
                 attribute        = "cn",
             })
-            assert(ok == false, "legacy verify_ldap_host should have enforced verification")
-            assert(err:find("SSL handshake", 1, true), "unexpected err: " .. tostring(err))
+            assert(ok == nil, "legacy verify_ldap_host must enforce verification: " ..
+                              "expected a transport failure (nil), got " .. tostring(ok))
+            assert(err:find("TLS handshake", 1, true), "unexpected err: " .. tostring(err))
             ngx.say("ok")
         }
     }
@@ -100,103 +102,7 @@ certificate verify error
 
 
 
-=== TEST 4: bind_request on a dead socket fails cleanly
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local ldap = require("resty.ldap.ldap")
-
-            local sock = ngx.socket.tcp()
-            sock:settimeout(10000)
-            assert(sock:connect("127.0.0.1", 1389))
-            sock:close() -- kill the connection underneath bind_request
-
-            local res, err = ldap.bind_request(sock,
-                "cn=user01,ou=users,dc=example,dc=org", "password1")
-            assert(res == nil, "a dead socket must fail, got " .. tostring(res))
-            assert(err ~= nil, "a dead socket must report an error")
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- error_log
-attempt to send data on a closed socket
-
-
-
-=== TEST 5: bind_request returns a controlled error when the response header is unreadable
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local ldap = require("resty.ldap.ldap")
-
-            local closed = false
-            local sock = {
-                send    = function(_, p) return #p end,
-                receive = function() return nil, "timeout" end,
-                close   = function() closed = true return true end,
-            }
-
-            local res, err = ldap.bind_request(sock,
-                "cn=user01,ou=users,dc=example,dc=org", "password1")
-            assert(res == nil, "a receive timeout must fail, got " .. tostring(res))
-            assert(err ~= nil, "a receive timeout must report an error")
-            assert(closed, "the unusable socket must be closed")
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-
-
-=== TEST 6: bind_request returns a controlled error when the response body is truncated
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local ldap = require("resty.ldap.ldap")
-
-            local closed, step = false, 0
-            local sock = {
-                send    = function(_, p) return #p end,
-                receive = function()
-                    step = step + 1
-                    if step == 1 then
-                        return "\48\05" -- header: SEQUENCE tag, body length 5
-                    end
-                    return nil, "closed" -- body read fails
-                end,
-                close   = function() closed = true return true end,
-            }
-
-            local res, err = ldap.bind_request(sock,
-                "cn=user01,ou=users,dc=example,dc=org", "password1")
-            assert(res == nil, "a truncated body must fail, got " .. tostring(res))
-            assert(err ~= nil, "a truncated body must report an error")
-            assert(closed, "the unusable socket must be closed")
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
-
-
-
-=== TEST 7: a DN-metacharacter username is escaped into the bind DN
+=== TEST 4: a DN-metacharacter username is escaped into the bind DN
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -210,7 +116,8 @@ ok
                 base_dn   = "ou=users,dc=example,dc=org",
                 attribute = "cn",
             })
-            assert(ok == false, "an unknown escaped username must fail cleanly")
+            assert(ok == false, "an unknown escaped username must be rejected (false), got " ..
+                                tostring(ok))
             assert(err:find("credential", 1, true),
                    "expected a credential error: " .. tostring(err))
             assert(user_dn == "cn=al\\,ice,ou=users,dc=example,dc=org",
@@ -227,7 +134,7 @@ ok
 
 
 
-=== TEST 8: ldap_authenticate binds a valid user with the raw DN
+=== TEST 5: ldap_authenticate binds a valid user with the raw DN
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -254,7 +161,7 @@ ok
 
 
 
-=== TEST 9: a wrong password is a clean auth failure
+=== TEST 6: a wrong password is a clean auth failure
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -266,7 +173,7 @@ ok
                 base_dn   = "ou=users,dc=example,dc=org",
                 attribute = "cn",
             })
-            assert(ok == false, "a wrong password must fail")
+            assert(ok == false, "a wrong password must be rejected (false), got " .. tostring(ok))
             assert(err:find("credential", 1, true), "expected a credential error: " .. tostring(err))
             ngx.say("ok")
         }
@@ -280,14 +187,14 @@ ok
 
 
 
-=== TEST 10: a pooled unverified connection is never reused when tls_verify=true
+=== TEST 7: an earlier unverified call never lets a tls_verify=true call skip verification
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
         content_by_lua_block {
             local ldap = require("resty.ldap")
 
-            -- pool a connection established with verification disabled
+            -- authenticate with verification disabled first
             local ok, err = ldap.ldap_authenticate("user01", "password1", {
                 ldap_host  = "localhost",
                 ldap_port  = 1636,
@@ -298,8 +205,9 @@ ok
             })
             assert(ok, "unverified handshake should bind: " .. tostring(err))
 
-            -- reusing the pooled connection would skip verification and bind;
-            -- a fresh connection must fail (no trusted certificate configured)
+            -- whatever state the first call left behind (it must not pool its
+            -- bound socket), a verifying call needs a fresh handshake, which
+            -- fails: no trusted certificate is configured
             local ok2, err2 = ldap.ldap_authenticate("user01", "password1", {
                 ldap_host  = "localhost",
                 ldap_port  = 1636,
@@ -308,8 +216,9 @@ ok
                 base_dn    = "ou=users,dc=example,dc=org",
                 attribute  = "cn",
             })
-            assert(ok2 == false, "the unverified pooled connection must not be reused")
-            assert(err2:find("SSL handshake", 1, true), "unexpected err: " .. tostring(err2))
+            assert(ok2 == nil, "the unverified call must not satisfy a verifying one: " ..
+                               "expected a transport failure (nil), got " .. tostring(ok2))
+            assert(err2:find("TLS handshake", 1, true), "unexpected err: " .. tostring(err2))
             ngx.say("ok")
         }
     }
@@ -319,44 +228,3 @@ GET /t
 ok
 --- error_log
 certificate verify error
-
-
-
-=== TEST 11: bind_request message IDs wrap back to 1 past RFC 4511 maxInt
---- http_config eval: $::HttpConfig
---- config
-    location /t {
-        content_by_lua_block {
-            local ldap = require("resty.ldap.ldap")
-            local upvalue = require("upvalue")
-            local message_id_of = require("ldap_msgid")
-
-            -- the counter is module-private; set it through bind_request's
-            -- upvalue cell, which all three request builders share
-            assert(upvalue.set(ldap.bind_request, "ldapMessageId", 2147483647))
-
-            local sent
-            local sock = {
-                send    = function(_, p) sent = p return #p end,
-                receive = function() return nil, "closed" end,
-                close   = function() return true end,
-            }
-
-            -- the mock cuts the response off, but the request is sent (and the
-            -- counter advanced) before the receive
-            ldap.bind_request(sock, "cn=x,dc=example,dc=org", "pw")
-            assert(message_id_of(sent) == 2147483647,
-                   "the request at maxInt itself is legal")
-            ldap.bind_request(sock, "cn=x,dc=example,dc=org", "pw")
-            local id = message_id_of(sent)
-            assert(id == 1, "id must wrap to 1 past maxInt, got " .. tostring(id))
-
-            ngx.say("ok")
-        }
-    }
---- request
-GET /t
---- response_body
-ok
---- no_error_log
-[error]
