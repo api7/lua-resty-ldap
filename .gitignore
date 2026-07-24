@@ -1,5 +1,6 @@
 # dev
 t/servroot
+deps/
 
 
 # Added by cargo
