@@ -1,6 +1,7 @@
 use ldap_codec::{decoder::decode, encoder::encode};
 use mlua::prelude::{Lua, LuaResult, LuaTable};
 
+mod gssapi;
 mod ldap_codec;
 
 #[mlua::lua_module]
@@ -9,6 +10,7 @@ fn rasn(lua: &Lua) -> LuaResult<LuaTable> {
 
     exports.set("encode_ldap", lua.create_function(encode)?)?;
     exports.set("decode_ldap", lua.create_function(decode)?)?;
+    exports.set("gssapi_new", lua.create_function(gssapi::new_ctx)?)?;
 
     Ok(exports)
 }

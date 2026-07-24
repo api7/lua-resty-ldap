@@ -43,6 +43,9 @@ pub fn decode<'lua>(
                 "diagnostic_msg",
                 bytes_to_string(resp.diagnostic_message).unwrap(),
             )?;
+            if let Some(creds) = resp.server_sasl_creds {
+                result.set("server_sasl_creds", lua.create_string(creds.as_ref())?)?;
+            }
             return Ok((LuaValue::Table(result), LuaValue::Nil));
         }
         ProtocolOp::SearchResEntry(entry) => {
