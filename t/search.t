@@ -115,7 +115,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 1, "result length is not equal to 1")
+            -- single level under the base: ou=users + ou=groups (image bootstrap)
+            assert(#res == 2, "result length is not equal to 2")
             assert(res[1].entry_dn == "ou=users,dc=example,dc=org", "result 1 entry_dn is not equal to ou=users,dc=example,dc=org")
         }
     }
@@ -531,7 +532,8 @@ GET /t
                 ngx.exit(401)
             end
 
-            assert(#res == 5, "result length is not equal to 5")
+            -- whole subtree: 6 entries bootstrapped by the image
+            assert(#res == 6, "result length is not equal to 6")
         }
     }
 --- request
