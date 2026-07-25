@@ -297,7 +297,7 @@ ok
 --- no_error_log
 [error]
 
-=== TEST 7: bytes trailing the PartialAttributeList inside the op are rejected
+=== TEST 7: bytes trailing a SearchResultEntry member are rejected
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -321,6 +321,26 @@ ok
             local res2, err2 = protocol.decode_message(
                 ldap_hex("30 0f 02 01 03 64 0a 04 01 78 30 00 04 03 41 42 43"))
             assert(res2 == nil and err2 ~= nil, "trailing TLV inside the op must be rejected")
+
+            -- one level deeper: PartialAttribute ::= SEQUENCE { type, vals } has
+            -- exactly two components, so bytes after vals are equally invalid
+            local inner = assert(protocol.decode_message(ldap_hex(
+                "30 15 02 01 03 64 10 04 01 78 30 0b 30 09 04 02 63 6e 31 03 04 01 41")))
+            assert(inner.attributes.cn[1] == "A", "inner baseline decodes")
+
+            -- same attribute, PartialAttribute grown by `de ad` after vals
+            local res3, err3 = protocol.decode_message(ldap_hex(
+                "30 17 02 01 03 64 12 04 01 78 30 0d 30 0b 04 02 63 6e 31 03 04 01 41 de ad"))
+            assert(res3 == nil, "trailing bytes in PartialAttribute must not decode " ..
+                   "(got cn=" .. tostring(res3 and res3.attributes.cn[1]) .. ")")
+            assert(err3 ~= nil, "trailing bytes in PartialAttribute must report an error")
+
+            -- and a well-formed TLV hidden in that same gap
+            local res4, err4 = protocol.decode_message(ldap_hex(
+                "30 1a 02 01 03 64 15 04 01 78 30 10 30 0e 04 02 63 6e 31 03 " ..
+                "04 01 41 04 03 41 42 43"))
+            assert(res4 == nil and err4 ~= nil,
+                   "trailing TLV in PartialAttribute must be rejected")
 
             ngx.say("ok")
         }

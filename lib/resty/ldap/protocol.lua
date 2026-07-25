@@ -308,9 +308,13 @@ local function parse_search_entry(packet, op, res)
                                                "AttributeDescription")
         if terr then return nil, terr end
         -- vals is a SET OF: enforce it so the stored value is always an array
-        local _, vals, verr = decode_typed(packet, vpos, pastop,
-                                           asn1.TAG.SET, "attribute vals")
+        local vend, vals, verr = decode_typed(packet, vpos, pastop,
+                                              asn1.TAG.SET, "attribute vals")
         if verr then return nil, verr end
+        -- PartialAttribute has exactly two components; nothing may follow vals
+        if vend ~= pastop then
+            return nil, "trailing bytes in PartialAttribute"
+        end
         attributes[atype] = vals                 -- ALWAYS an array (empty for typesOnly)
         apos = pastop
     end
