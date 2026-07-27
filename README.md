@@ -63,7 +63,7 @@ To load this module:
 
 `bind_dn` and `password` can be `nil` values, that means the client is instructed to do anonymous bind.
 
-`res` is a boolean type value that will be true when authentication is successful, when it is false, `err` will contain errors.
+`res` is `true` when authentication succeeds and `false` when the server rejects the bind (or the request cannot be encoded); on a transport or decoding failure `res` is `nil`. In both failure cases `err` carries the error.
 
 #### search
 
@@ -84,3 +84,57 @@ To load this module:
 `filter` is an LDAP filter expression in string. Default is `(objectClass=*)`.
 
 `attributes` is an array table that contains one to more query fields that you need to have the LDAP server return. Default is `["objectClass"]`.
+
+#### connect
+
+**syntax:** *ok, err = client:connect()*
+
+Establishes and pins the underlying connection, so that subsequent operations on this client (for example a `simple_bind` followed by a `search`) run on that same connection instead of each drawing one from the connection pool. Release the connection with `set_keepalive` or `close` when done.
+
+An unrecoverable socket error also releases the pin, so the next operation draws a fresh connection instead of reusing the dead one.
+
+#### set_keepalive
+
+**syntax:** *ok, err = client:set_keepalive()*
+
+Releases a pinned connection back into the connection pool. The client remains usable; subsequent operations draw pooled connections as before.
+
+#### close
+
+**syntax:** *ok, err = client:close()*
+
+Closes a pinned connection without returning it to the pool.
+
+### resty.ldap
+
+Compatibility entrypoint kept for APISIX's `ldap-auth` plugin, preserving the v0.1.0 `ldap_authenticate` contract as a thin wrapper over `resty.ldap.client`. New code should use `resty.ldap.client` instead.
+
+```lua
+    local ldap = require "resty.ldap"
+```
+
+#### ldap_authenticate
+
+**syntax:** *ok, err, user_dn = ldap.ldap_authenticate(username, password, conf)*
+
+Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds, `false` when the server rejects the credentials, and `nil` on a connect/TLS/transport failure; in both failure cases `err` carries the error. The connection is always closed after the bind attempt — a socket that carried a Bind is never returned to the pool.
+
+`username` is escaped per RFC 4514 when the bind DN is built, so DN metacharacters (`, + " \ < > ; =`, a leading space or `#`, a trailing space, or a NUL) are treated as literal characters of the RDN value instead of injecting extra RDN components. Any username string is accepted, as in v0.1.0.
+
+`user_dn` is the canonical (escaped) DN the bind was performed with; callers that key identity on the DN (e.g. the APISIX `ldap-auth` consumer lookup) should use it instead of rebuilding the DN from the raw username. It is returned whenever a bind was attempted, and is `nil` on connect/STARTTLS/handshake failures.
+
+`conf` is a table of below items (note the key names differ from `resty.ldap.client`'s `client_config`; they follow the v0.1.0 / `ldap-auth` contract):
+
+| key      | type | default value      | Description |
+| ----------- | ----------- | ----------- | ----------- |
+| `ldap_host`           | string       | localhost  | LDAP server host. |
+| `ldap_port`           | number       | 389        | LDAP server port. |
+| `timeout`             | number       | 10000      | Socket timeout in milliseconds. |
+| `keepalive`           | number       | 60000      | Accepted for v0.1.0 compatibility, but unused: sockets that carried a bind are always closed, never pooled. |
+| `start_tls`           | boolean      | false      | Issue the StartTLS extended operation before binding. |
+| `ldaps`               | boolean      | false      | Connect using LDAP over TLS. |
+| `tls_verify`          | boolean      | false      | Verify the server certificate during the TLS handshake. This is the key APISIX's `ldap-auth` passes. |
+| `verify_ldap_host`    | boolean      | false      | Legacy alias for `tls_verify` (pre-0.2). Honoured only when `tls_verify` is not set. |
+| `base_dn`             | string       | ou=users,dc=example,dc=org | Base DN the username is appended to. |
+| `attribute`           | string       | cn         | RDN attribute the username is bound as. |
+
