@@ -400,9 +400,12 @@ ok
                 local pok, res, err = pcall(protocol.decode_message, ldap_hex(c[2]))
                 if not pok then
                     table.insert(leaks, c[1] .. " RAISED: " .. tostring(res))
-                elseif res ~= nil or err == nil then
+                elseif res ~= nil then
                     table.insert(leaks, string.format("%s accepted (vals[1] is a %s)",
-                        c[1], type(res.attributes.s and res.attributes.s[1])))
+                        c[1], type(res.attributes and res.attributes.s
+                                   and res.attributes.s[1])))
+                elseif err == nil then
+                    table.insert(leaks, c[1] .. " returned nil with no error")
                 end
             end
             if #leaks > 0 then

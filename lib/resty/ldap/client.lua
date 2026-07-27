@@ -215,9 +215,11 @@ local function _send_receive(cli, request, multi_resp_hint)
         -- body packet.
         local len, err = socket:receive(2)
         if not len then
-            if err == "timeout" then
+            -- with nothing decoded yet this is a failed exchange, not a clean
+            -- end: a pooled socket the server already dropped reads "closed"
+            if err == "timeout" or #result == 0 then
                 _reset_socket(cli)
-                return nil, fmt("receive response failed: %s", err)
+                return nil, fmt("receive response failed: %s", err or "unknown")
             end
             break -- read done, data has been taken to the end
         end

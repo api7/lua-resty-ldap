@@ -490,3 +490,42 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+
+=== TEST 16: a dropped connection before any response is a reported failure
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+
+            -- a pooled socket the server has already dropped reads "closed",
+            -- not "timeout", on the very first header read
+            local closed = false
+            local sock = {
+                send    = function(_, p) return #p end,
+                receive = function() return nil, "closed" end,
+                close   = function() closed = true return true end,
+            }
+
+            local client = ldap_client:new("127.0.0.1", 1389)
+            client.socket = sock
+            client.pinned = true
+
+            local res, err = client:simple_bind(
+                "cn=user01,ou=users,dc=example,dc=org", "password1")
+            assert(res == nil, "a dropped connection must be a transport failure (nil)")
+            assert(err ~= nil, "it must carry a diagnostic, got nil")
+            assert(err:find("receive response failed", 1, true),
+                   "unexpected err: " .. tostring(err))
+            assert(closed, "the unusable socket must be closed")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]

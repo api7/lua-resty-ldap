@@ -7,7 +7,9 @@ dev:
 .PHONY: test
 test:
 	git apply t/patch/unknown_op.patch
-	prove -r t/; ret=$$?; git apply t/patch/unknown_op.patch -R; exit $$ret
+	trap 'git apply t/patch/unknown_op.patch -R' EXIT; \
+	trap 'exit 130' INT TERM HUP; \
+	prove -r t/
 
 ### help:         Show Makefile rules
 .PHONY: help
