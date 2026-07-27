@@ -283,3 +283,41 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 7: messageID outside 0..maxInt is rejected
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local protocol = require("resty.ldap.protocol")
+            local ldap_hex = require("ldap_hex")
+
+            -- representable, so TEST 6's overflow guard never saw these
+            local bad = {
+                {"30 0c 02 01 ff 65 07 0a 01 00 04 00 04 00", "messageID -1"},
+                {"30 10 02 05 00 80 00 00 00 65 07 0a 01 00 04 00 04 00", "messageID maxInt+1"},
+                {"30 10 02 05 ff 7f ff ff ff 65 07 0a 01 00 04 00 04 00", "messageID -maxInt-2"},
+            }
+            for _, c in ipairs(bad) do
+                local res, err = protocol.decode_message(ldap_hex(c[1]))
+                assert(res == nil and err ~= nil,
+                    c[2] .. " must be rejected; got " .. tostring(res and res.message_id))
+            end
+
+            -- both ends of the legal range still decode
+            local zero = assert(protocol.decode_message(ldap_hex(
+                "30 0c 02 01 00 65 07 0a 01 00 04 00 04 00")))
+            assert(zero.message_id == 0, "messageID 0")
+            local max = assert(protocol.decode_message(ldap_hex(
+                "30 0f 02 04 7f ff ff ff 65 07 0a 01 00 04 00 04 00")))
+            assert(max.message_id == 2147483647, "messageID maxInt")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]

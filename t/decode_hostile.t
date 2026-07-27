@@ -371,3 +371,65 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 11: every AttributeValue must be an OCTET STRING
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local protocol = require("resty.ldap.protocol")
+            local ldap_hex = require("ldap_hex")
+
+            -- rasn dropped the whole attribute here; the pure-Lua decoder used to
+            -- store the value, leaking a number or a table into a string array
+            local cases = {
+                { "INTEGER value",
+                  "30 14 02 01 03 64 0f 04 01 78 30 0a 30 08 04 01 73 31 03 02 01 05" },
+                { "ENUMERATED value",
+                  "30 14 02 01 03 64 0f 04 01 78 30 0a 30 08 04 01 73 31 03 0a 01 07" },
+                { "SEQUENCE value",
+                  "30 13 02 01 03 64 0e 04 01 78 30 09 30 07 04 01 73 31 02 30 00" },
+                { "nested SET value",
+                  "30 16 02 01 03 64 11 04 01 78 30 0c 30 0a 04 01 73 31 05 31 03 04 01 41" },
+                { "one good value then an INTEGER",
+                  "30 17 02 01 03 64 12 04 01 78 30 0d 30 0b 04 01 73 31 06 04 01 41 02 01 05" },
+            }
+
+            local leaks = {}
+            for _, c in ipairs(cases) do
+                local pok, res, err = pcall(protocol.decode_message, ldap_hex(c[2]))
+                if not pok then
+                    table.insert(leaks, c[1] .. " RAISED: " .. tostring(res))
+                elseif res ~= nil or err == nil then
+                    table.insert(leaks, string.format("%s accepted (vals[1] is a %s)",
+                        c[1], type(res.attributes.s and res.attributes.s[1])))
+                end
+            end
+            if #leaks > 0 then
+                ngx.say(#leaks .. " non-OCTET-STRING values accepted:")
+                ngx.say(table.concat(leaks, "\n"))
+                return
+            end
+
+            -- the tightened check must not cost BER leniency
+            local lenient = assert(protocol.decode_message(ldap_hex(
+                "30 17 02 01 03 64 12 04 01 78 30 0d 30 0b 04 01 73 31 06 04 81 03 41 42 43")))
+            assert(lenient.attributes.s[1] == "ABC", "non-minimal length still decodes")
+
+            -- and well-formed entries are untouched
+            local ok = assert(protocol.decode_message(ldap_hex(
+                "30 14 02 01 03 64 0f 04 01 78 30 0a 30 08 04 01 73 31 03 04 01 41")))
+            assert(ok.attributes.s[1] == "A", "single value")
+            local empty = assert(protocol.decode_message(ldap_hex(
+                "30 11 02 01 03 64 0c 04 01 78 30 07 30 05 04 01 73 31 00")))
+            assert(#empty.attributes.s == 0, "typesOnly empty SET stays an empty array")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
