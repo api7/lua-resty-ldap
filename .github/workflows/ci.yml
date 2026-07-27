@@ -31,9 +31,6 @@ jobs:
           # Test::Nginx
           sudo cpanm --notest Test::Nginx
 
-          # rust
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
           # luarocks
           sudo apt -y install lua5.1 luarocks
           luarocks make rockspec/lua-resty-ldap-local-0.rockspec --local --tree ./deps # install deps to local

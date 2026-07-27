@@ -1,18 +1,12 @@
 local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
-local to_hex   = require("resty.string").to_hex
-local ok, rasn = pcall(require, "rasn")
-
-if not ok then
-    error("failed to load rasn library: " .. rasn)
-end
 
 local tostring     = tostring
 local fmt          = string.format
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local string_char  = string.char
-local rasn_decode  = rasn.decode_ldap
+local decode_ldap  = protocol.decode_message
 
 
 local _M = {}
@@ -65,16 +59,16 @@ local function _start_tls(sock)
     end
 
     local packet = packet_header .. packet
-    local ok, res, err = pcall(rasn_decode, packet)
-    if not ok or err then
-        return nil, fmt(
-            "failed to decode ldap message: %s, message: %s",
-            not ok and res or err, -- error returned in second value by pcall
-            to_hex(packet)
-        )
+    local res, err = decode_ldap(packet)
+    if not res then
+        sock:close()
+        -- the body can carry DNs and attribute values; keep it out of the error
+        return fmt("failed to decode ldap message: %s (%d bytes)",
+                   err or "unknown", #packet)
     end
 
     if res.protocol_op ~= protocol.APP_NO.ExtendedResponse then
+        sock:close()
         return fmt("received incorrect op in packet: %d, expected %d",
                     res.protocol_op, protocol.APP_NO.ExtendedResponse)
     end
@@ -82,6 +76,7 @@ local function _start_tls(sock)
     if res.result_code ~= 0 then
         local error_msg = protocol.ERROR_MSG[res.result_code]
 
+        sock:close()
         return fmt("error: %s, details: %s",
                     error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
                     res.diagnostic_msg or "")
@@ -143,7 +138,7 @@ local function _init_socket(self)
     self.socket = sock
 end
 
-local function _send_recieve(cli, request, multi_resp_hint)
+local function _send_receive(cli, request, multi_resp_hint)
     -- initialize socket
     local err = _init_socket(cli)
     if err then
@@ -192,13 +187,12 @@ local function _send_recieve(cli, request, multi_resp_hint)
         end
 
         local packet = packet_header .. packet
-        local ok, res, err = pcall(rasn_decode, packet)
-        if not ok or err then
-            return nil, fmt(
-                "failed to decode ldap message: %s, message: %s",
-                not ok and res or err, -- error returned in second value by pcall
-                to_hex(packet)
-            )
+        local res, err = decode_ldap(packet)
+        if not res then
+            socket:close()
+            -- the body can carry DNs and attribute values; keep it out of the error
+            return nil, fmt("failed to decode ldap message: %s (%d bytes)",
+                            err or "unknown", #packet)
         end
 
         table_insert(result, res)
@@ -257,7 +251,7 @@ end
 
 
 function _M.simple_bind(self, dn, password)
-    local res, err = _send_recieve(self, protocol.simple_bind_request(dn, password))
+    local res, err = _send_receive(self, protocol.simple_bind_request(dn, password))
     if not res then
         return false, err
     end
@@ -296,7 +290,7 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
         return false, err
     end
 
-    local res, err = _send_recieve(self, search_req, true) -- mark as potential multi-response operation
+    local res, err = _send_receive(self, search_req, true) -- mark as potential multi-response operation
     if not res then
         return false, err
     end
