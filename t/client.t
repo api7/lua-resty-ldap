@@ -237,6 +237,12 @@ ok
                    "an unverified pooled STARTTLS connection must not serve ssl_verify=true")
             assert(b:set_keepalive())
 
+            -- control: the same policy does reuse its own pooled connection
+            local c = ldap_client:new("localhost", 1389, { start_tls = true, ssl_verify = false })
+            assert(c:connect())
+            assert(c.socket:getreusedtimes() > 0, "same-policy reuse should hit the pool")
+            assert(c:set_keepalive())
+
             ngx.say("ok")
         }
     }
