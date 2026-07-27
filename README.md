@@ -99,6 +99,8 @@ An unrecoverable socket error also releases the pin, so the next operation draws
 
 Releases a pinned connection back into the connection pool. The client remains usable; subsequent operations draw pooled connections as before.
 
+A session that issued a `simple_bind` closes its connection instead of pooling it.
+
 #### close
 
 **syntax:** *ok, err = client:close()*
@@ -130,7 +132,7 @@ Binds against the directory as `<attribute>=<username>,<base_dn>` with the given
 | `ldap_host`           | string       | *required* | LDAP server host. |
 | `ldap_port`           | number       | 389        | LDAP server port. |
 | `timeout`             | number       | 10000      | Socket timeout in milliseconds. |
-| `keepalive`           | number       | 60000      | Accepted for v0.1.0 compatibility, but unused: sockets that carried a bind are always closed, never pooled. |
+| `keepalive`           | number       | 60000      | How long an idle connection lives in the pool, in milliseconds. |
 | `start_tls`           | boolean      | false      | Issue the StartTLS extended operation before binding. |
 | `ldaps`               | boolean      | false      | Connect using LDAP over TLS. |
 | `tls_verify`          | boolean      | true       | Verify the server certificate during the TLS handshake. This is the key APISIX's `ldap-auth` passes. |

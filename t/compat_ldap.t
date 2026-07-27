@@ -24,7 +24,7 @@ __DATA__
             local ldap = require("resty.ldap")
             -- no lua_ssl_trusted_certificate, so verifying the test CA must fail
             local ok, err = ldap.ldap_authenticate("user01", "password1", {
-                ldap_host  = "localhost",
+                ldap_host  = "127.0.0.1",
                 ldap_port  = 1636,
                 ldaps      = true,
                 tls_verify = true,
@@ -53,7 +53,7 @@ certificate verify error
         content_by_lua_block {
             local ldap = require("resty.ldap")
             local ok, err = ldap.ldap_authenticate("user01", "password1", {
-                ldap_host  = "localhost",
+                ldap_host  = "127.0.0.1",
                 ldap_port  = 1636,
                 ldaps      = true,
                 tls_verify = false,
@@ -196,7 +196,7 @@ ok
 
             -- authenticate with verification disabled first
             local ok, err = ldap.ldap_authenticate("user01", "password1", {
-                ldap_host  = "localhost",
+                ldap_host  = "127.0.0.1",
                 ldap_port  = 1636,
                 ldaps      = true,
                 tls_verify = false,
@@ -205,11 +205,11 @@ ok
             })
             assert(ok, "unverified handshake should bind: " .. tostring(err))
 
-            -- whatever state the first call left behind (it must not pool its
-            -- bound socket), a verifying call needs a fresh handshake, which
+            -- the first call pools its socket under :noverify:bind, so the
+            -- verifying call cannot draw it and needs a fresh handshake, which
             -- fails: no trusted certificate is configured
             local ok2, err2 = ldap.ldap_authenticate("user01", "password1", {
-                ldap_host  = "localhost",
+                ldap_host  = "127.0.0.1",
                 ldap_port  = 1636,
                 ldaps      = true,
                 tls_verify = true,
@@ -244,6 +244,16 @@ certificate verify error
             })
             assert(ok == nil, "a missing ldap_host must not authenticate, got " .. tostring(ok))
             assert(err == "ldap_host is required", "unexpected err: " .. tostring(err))
+
+            -- an empty string is the same misconfiguration, set rather than omitted
+            local ok2, err2 = ldap.ldap_authenticate("user01", "password1", {
+                ldap_host = "",
+                ldap_port = 1389,
+                base_dn   = "ou=users,dc=example,dc=org",
+                attribute = "cn",
+            })
+            assert(ok2 == nil, "an empty ldap_host must not authenticate, got " .. tostring(ok2))
+            assert(err2 == "ldap_host is required", "unexpected err: " .. tostring(err2))
             ngx.say("ok")
         }
     }
@@ -271,6 +281,45 @@ ok
             })
             assert(ok == nil, "a missing base_dn must not authenticate, got " .. tostring(ok))
             assert(err == "base_dn is required", "unexpected err: " .. tostring(err))
+
+            -- an empty base_dn would bind under "cn=user01," and be reported as
+            -- a credential failure rather than the misconfiguration it is
+            local ok2, err2 = ldap.ldap_authenticate("user01", "password1", {
+                ldap_host = "127.0.0.1",
+                ldap_port = 1389,
+                base_dn   = "",
+                attribute = "cn",
+            })
+            assert(ok2 == nil, "an empty base_dn must not authenticate, got " .. tostring(ok2))
+            assert(err2 == "base_dn is required", "unexpected err: " .. tostring(err2))
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+
+=== TEST 10: an invalid password is reported without opening a socket
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap = require("resty.ldap")
+            -- port 1 has no listener: a socket error here instead of the
+            -- validation message means the bind connected before checking
+            local ok, err = ldap.ldap_authenticate("user01", true, {
+                ldap_host = "127.0.0.1",
+                ldap_port = 1,
+                base_dn   = "ou=users,dc=example,dc=org",
+                attribute = "cn",
+            })
+            assert(ok == false, "a non-string password must be rejected (false), got " ..
+                                tostring(ok))
+            assert(err == "bind password must be a string", "unexpected err: " .. tostring(err))
             ngx.say("ok")
         }
     }

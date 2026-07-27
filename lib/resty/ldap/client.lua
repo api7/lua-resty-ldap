@@ -3,6 +3,8 @@ local protocol = require("resty.ldap.protocol")
 
 local tostring     = tostring
 local fmt          = string.format
+local log          = ngx.log
+local ERR          = ngx.ERR
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local decode_ldap  = protocol.decode_message
@@ -53,19 +55,20 @@ local function calculate_payload_length(encStr, pos, socket)
     return elen, encStr
 end
 
+-- every failure path closes sock: _init_socket has not adopted it yet, so
+-- nothing else can, and the connection would linger until garbage collection
 local function _start_tls(sock)
     -- send STARTTLS request
     local bytes, err = sock:send(protocol.start_tls_request())
     if not bytes then
+        sock:close()
         return fmt("send request failed: %s", err)
     end
 
     -- receive STARTTLS response
     local len, err = sock:receive(2)
     if not len then
-        if err == "timeout" then
-            sock:close()
-        end
+        sock:close()
         return fmt("receive response header failed: %s", err)
     end
     local packet_len, packet_header, lerr = calculate_payload_length(len, 2, sock)
@@ -105,7 +108,7 @@ local function _start_tls(sock)
     end
 end
 
-local function _init_socket(self)
+local function _init_socket(self, will_bind)
     local host = self.host
     local port = self.port
     local socket_config = self.socket_config
@@ -124,6 +127,13 @@ local function _init_socket(self)
     end
     if pool_suffix ~= "" then
         pool_suffix = pool_suffix .. (socket_config.ssl_verify and ":verify" or ":noverify")
+    end
+
+    -- Sockets that carried a Bind pool separately, drawn only by a caller that
+    -- binds first: RFC 4513 s4 resets the session to anonymous on receipt of that
+    -- Bind, so no identity carries over. Everything else stays anonymous.
+    if will_bind then
+        pool_suffix = pool_suffix .. ":bind"
     end
 
     local opts = {
@@ -147,12 +157,13 @@ local function _init_socket(self)
         local count, err = sock:getreusedtimes()
         if not count then
             -- connection was closed, just return instead
+            sock:close()
             return fmt("get %s:%s connection re-used time failed: %s",
                         host, tostring(port), err)
         end
 
         if count == 0 then
-            -- STARTTLS
+            -- STARTTLS (_start_tls closes the socket on every failure)
             local err = _start_tls(sock)
             if err then
                 return fmt("launch STARTTLS connection on %s:%s failed: %s",
@@ -165,6 +176,7 @@ local function _init_socket(self)
         local _
         _, err = sock:sslhandshake(true, host, socket_config.ssl_verify)
         if err ~= nil then
+            sock:close()
             return fmt("do TLS handshake on %s:%s failed: %s",
                         host, tostring(port), err)
         end
@@ -184,13 +196,32 @@ local function _reset_socket(cli)
     end
 end
 
-local function _send_receive(cli, request, multi_resp_hint)
+-- return a single-shot socket to its pool; a pinned one is released by its owner
+local function _release_socket(cli)
+    if cli.pinned then
+        return
+    end
+
+    local sock = cli.socket
+    cli.socket = nil
+    if not sock then
+        return
+    end
+
+    local ok, err = sock:setkeepalive(cli.socket_config.keepalive_timeout)
+    if not ok then
+        -- ngx_lua already dropped the socket; log it because "connection in
+        -- dubious state" means a response went unread
+        log(ERR, "failed to return the connection to the pool: ", err)
+    end
+end
+
+local function _send_receive(cli, request, multi_resp_hint, will_bind)
     -- In a pinned session the socket is already checked out; otherwise check out
     -- one for this single operation.
     if not cli.pinned then
-        local err = _init_socket(cli)
+        local err = _init_socket(cli, will_bind)
         if err then
-            cli.bound = nil
             return nil, fmt("initialize socket failed: %s", err)
         end
     end
@@ -263,18 +294,8 @@ local function _send_receive(cli, request, multi_resp_hint)
         end
     end
 
-    -- single-shot ops return the socket to the pool; a pinned session is
-    -- released explicitly by the caller. A bound socket carries the Bind
-    -- identity while the pool key does not, so close it instead of pooling.
-    if not cli.pinned then
-        if cli.bound then
-            cli.bound = nil
-            socket:close()
-        else
-            socket:setkeepalive(cli.socket_config.keepalive_timeout)
-        end
-    end
-
+    -- the caller releases: setkeepalive is irreversible, so the response has to
+    -- be validated first
     return multi_resp_hint and result or result[1]
 end
 
@@ -365,8 +386,13 @@ function _M.simple_bind(self, dn, password)
         return false, berr
     end
 
-    self.bound = true
-    local res, err = _send_receive(self, req)
+    -- only pinned sockets need this: they came from the anonymous pool, so a Bind
+    -- leaves them unpoolable. A single-shot one came from the bind pool already.
+    if self.pinned then
+        self.bound = true
+    end
+
+    local res, err = _send_receive(self, req, nil, true)
     if not res then
         -- transport/decode failure: nil, so callers can tell an unreachable
         -- or broken server (nil) from rejected credentials (false)
@@ -374,9 +400,13 @@ function _M.simple_bind(self, dn, password)
     end
 
     if res.protocol_op ~= protocol.APP_NO.BindResponse then
+        -- the BindResponse may still be queued behind this one: not reusable
+        _reset_socket(self)
         return false, fmt("Received incorrect Op in packet: %d, expected %d",
             res.protocol_op, protocol.APP_NO.BindResponse)
     end
+
+    _release_socket(self)
 
     if res.result_code ~= 0 then
         local error_msg = protocol.ERROR_MSG[res.result_code]
@@ -411,6 +441,9 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
     if not res then
         return false, err
     end
+
+    -- the exchange ended at SearchResultDone, so the socket is clean even on failure
+    _release_socket(self)
 
     for index, item in ipairs(res) do
         if item.protocol_op == protocol.APP_NO.SearchResultDone then

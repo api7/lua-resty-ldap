@@ -298,7 +298,7 @@ ok
 
 
 
-=== TEST 11: a single-shot bind never returns its socket to the shared pool
+=== TEST 11: a single-shot bind pools apart from the anonymous pool
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -306,31 +306,35 @@ ok
             local ldap_client = require("resty.ldap.client")
             local protocol = require("resty.ldap.protocol")
 
-            -- control: an unbound single-shot search does re-enter the pool
+            -- prime the anonymous pool: an unbound single-shot search re-enters it
             local a = ldap_client:new("127.0.0.1", 1389)
             assert(a:search("dc=example,dc=org",
                 protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)"))
+
+            -- a single-shot admin bind draws from the bind pool, which is still
+            -- empty, so it opens its own connection and leaves that one alone
             local b = ldap_client:new("127.0.0.1", 1389)
-            assert(b:connect())
-            assert(b.socket:getreusedtimes() > 0, "unbound search should hit the pool")
-            assert(b:set_keepalive())
+            assert(b:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
 
-            -- a single-shot admin bind checks out the pooled socket, binds on
-            -- it, and must close it on release instead of pooling it again
+            -- exactly one checkout behind the anonymous socket. Had the bind
+            -- borrowed it this would be 2 (pooled back) or 0 (closed), and
+            -- either way the search below could inherit the admin identity.
             local c = ldap_client:new("127.0.0.1", 1389)
-            assert(c:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
-
-            -- a new anonymous client must get a fresh connection; its search
-            -- must not inherit the admin identity
-            local d = ldap_client:new("127.0.0.1", 1389)
-            assert(d:connect())
-            assert(d.socket:getreusedtimes() == 0,
-                   "admin-bound socket leaked into the pool")
-            local res, serr = d:search("dc=example,dc=org",
+            assert(c:connect())
+            assert(c.socket:getreusedtimes() == 1,
+                   "a bind must not draw from the anonymous pool, got " ..
+                   c.socket:getreusedtimes())
+            local res, serr = c:search("dc=example,dc=org",
                 protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
             assert(res, "anonymous search: " .. tostring(serr))
             assert(#res == 1, "one entry")
-            assert(d:set_keepalive())
+            assert(c:set_keepalive())
+
+            -- the bind pool did keep its socket, so the next bind reuses it
+            local probe = ngx.socket.tcp()
+            assert(probe:connect("127.0.0.1", 1389, { pool = "127.0.0.1:1389:bind" }))
+            assert(probe:getreusedtimes() > 0, "the bound socket was not pooled")
+            probe:close()
 
             ngx.say("ok")
         }
@@ -344,7 +348,7 @@ ok
 
 
 
-=== TEST 12: ldap_authenticate never pools a socket that carried a bind
+=== TEST 12: ldap_authenticate reuses the bind pool and never the anonymous one
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -357,24 +361,33 @@ ok
                 attribute = "cn",
             }
 
-            -- a failed bind closes its socket instead of pooling it; the pool
-            -- is observable as the default host:port pool
-            local ok = ldap.ldap_authenticate("user01", "wrong-password", conf)
-            assert(ok == false, "a wrong password must be rejected (false), got " .. tostring(ok))
-            local probe = ngx.socket.tcp()
-            assert(probe:connect("127.0.0.1", 1389))
-            assert(probe:getreusedtimes() == 0,
-                   "failed-bind socket leaked into the pool")
-            probe:close()
-
-            -- a successful bind leaves the socket holding the user's identity,
-            -- so it too must be closed, never pooled
+            -- the first call opens a connection, the second reuses it: one
+            -- socket, two binds on it
+            local ok, err = ldap.ldap_authenticate("user01", "password1", conf)
+            assert(ok, "authenticate failed: " .. tostring(err))
             local ok2, err2 = ldap.ldap_authenticate("user01", "password1", conf)
             assert(ok2, "authenticate failed: " .. tostring(err2))
+
+            local probe = ngx.socket.tcp()
+            assert(probe:connect("127.0.0.1", 1389, { pool = "127.0.0.1:1389:bind" }))
+            assert(probe:getreusedtimes() == 2,
+                   "the second authenticate should have reused the pooled socket, got " ..
+                   probe:getreusedtimes())
+            probe:close()
+
+            -- a rejected bind leaves the session anonymous (RFC 4513 s4), so its
+            -- socket is poolable too, and the next call still rebinds on it
+            local ok3 = ldap.ldap_authenticate("user01", "wrong-password", conf)
+            assert(ok3 == false, "a wrong password must be rejected (false), got " .. tostring(ok3))
+            local ok4, err4 = ldap.ldap_authenticate("user01", "password1", conf)
+            assert(ok4, "a reused socket must still authenticate: " .. tostring(err4))
+
+            -- and none of those sockets ever entered the anonymous pool, where an
+            -- unbound search would have picked up a user's identity
             local probe2 = ngx.socket.tcp()
             assert(probe2:connect("127.0.0.1", 1389))
             assert(probe2:getreusedtimes() == 0,
-                   "user-bound socket leaked into the pool")
+                   "a bound socket leaked into the anonymous pool")
             probe2:close()
 
             ngx.say("ok")

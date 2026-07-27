@@ -51,10 +51,10 @@ local _M = {}
 function _M.ldap_authenticate(given_username, given_password, conf)
     set_conf_default_values(conf)
 
-    if conf.ldap_host == nil then
+    if conf.ldap_host == nil or conf.ldap_host == "" then
         return nil, "ldap_host is required"
     end
-    if conf.base_dn == nil then
+    if conf.base_dn == nil or conf.base_dn == "" then
         return nil, "base_dn is required"
     end
 
@@ -74,22 +74,16 @@ function _M.ldap_authenticate(given_username, given_password, conf)
         ssl_verify        = conf.tls_verify,
     })
 
-    local ok, err = cli:connect()
-    if not ok then
-        log(ERR, "failed to connect to ", conf.ldap_host, ":",
-                 tostring(conf.ldap_port), ": ", err)
-        return nil, err
-    end
-
     local who = conf.attribute .. "=" .. escape_dn_value(given_username) ..
                 "," .. conf.base_dn
+    -- not pinned: simple_bind validates before opening a socket, and releases it
+    -- into the bind pool for the next authenticate to reuse
     local is_authenticated, bind_err = cli:simple_bind(who, given_password)
 
-    -- the socket carried a Bind attempt: always close it, never pool it
-    cli:close()
-
     if is_authenticated == nil then
-        -- transport failure mid-bind; the client already dropped the socket
+        -- connect, TLS or transport failure; the client already dropped the socket
+        log(ERR, "failed to bind to ", conf.ldap_host, ":",
+                 tostring(conf.ldap_port), ": ", bind_err)
         return nil, bind_err
     end
 
