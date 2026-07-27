@@ -215,13 +215,11 @@ local function _send_receive(cli, request, multi_resp_hint)
         -- body packet.
         local len, err = socket:receive(2)
         if not len then
-            -- with nothing decoded yet this is a failed exchange, not a clean
-            -- end: a pooled socket the server already dropped reads "closed"
-            if err == "timeout" or #result == 0 then
-                _reset_socket(cli)
-                return nil, fmt("receive response failed: %s", err or "unknown")
-            end
-            break -- read done, data has been taken to the end
+            -- a search ends at SearchResultDone and a single-response op at its
+            -- one message; a timeout or close before either truncates the
+            -- exchange, so fail rather than return what arrived so far
+            _reset_socket(cli)
+            return nil, fmt("receive response failed: %s", err or "unknown")
         end
 
         local packet_len, packet_header, lerr = calculate_payload_length(len, 2, socket)
@@ -259,8 +257,6 @@ local function _send_receive(cli, request, multi_resp_hint)
         -- just a straight stack of LDAP messages. Therefore the parser implementor
         -- does not know exactly how many bytes of data should be fetched, and has
         -- to read in greedy mode.
-        -- The socket read timeout will be used as a fallback when an exception is
-        -- encountered and this does not end the loop.
         if not multi_resp_hint or
            (res and res.protocol_op == protocol.APP_NO.SearchResultDone) then
             break

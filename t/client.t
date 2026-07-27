@@ -7,7 +7,7 @@ repeat_each(1);
 plan 'no_plan';
 
 our $HttpConfig = <<'_EOC_';
-    lua_package_path 'lib/?.lua;/usr/share/lua/5.1/?.lua;;';
+    lua_package_path 'lib/?.lua;t/lib/?.lua;/usr/share/lua/5.1/?.lua;;';
     lua_package_cpath 'deps/lib/lua/5.1/?.so;;';
     resolver 127.0.0.53;
 _EOC_
@@ -518,6 +518,52 @@ ok
             assert(err ~= nil, "it must carry a diagnostic, got nil")
             assert(err:find("receive response failed", 1, true),
                    "unexpected err: " .. tostring(err))
+            assert(closed, "the unusable socket must be closed")
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+
+=== TEST 17: a search cut short before SearchResultDone must fail, not return partial results
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+            local ldap_hex = require("ldap_hex")
+
+            -- one complete SearchResultEntry, then the peer goes away without
+            -- ever sending SearchResultDone
+            local entry = ldap_hex("30 16 02 01 03 64 11 04 01 78" ..
+                                   " 30 0c 30 0a 04 01 73 31 05 04 03 01 00 02")
+            local step, closed = 0, false
+            local sock = {
+                send    = function(_, p) return #p end,
+                receive = function(_, n)
+                    step = step + 1
+                    if step == 1 then return entry:sub(1, 2) end
+                    if step == 2 then return entry:sub(3) end
+                    return nil, "closed"
+                end,
+                close   = function() closed = true return true end,
+            }
+
+            local client = ldap_client:new("127.0.0.1", 1389)
+            client.socket = sock
+            client.pinned = true
+
+            local res, err = client:search("dc=example,dc=org")
+            assert(res == false,
+                   "a truncated search must fail; got " .. type(res) ..
+                   " with " .. tostring(type(res) == "table" and #res or "n/a") .. " entries")
+            assert(err ~= nil, "it must carry a diagnostic, got nil")
             assert(closed, "the unusable socket must be closed")
 
             ngx.say("ok")
