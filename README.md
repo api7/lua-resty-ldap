@@ -22,7 +22,7 @@ local client = ldap_client:new("127.0.0.1", 1389, {
     keepalive_timeout = 60000,
     start_tls = false,
     ldaps = false,
-    ssl_verify = false
+    ssl_verify = true
 })
 local err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
 ```
@@ -49,7 +49,7 @@ To load this module:
 | `keepalive_timeout`   | number       | 60000      | An optional value in milliseconds that defines how long an idle connection to LDAP server will live before being closed.       |
 | `start_tls`           | boolean      | false      | Set it to `true` to issue StartTLS (Transport Layer Security) extended operation over ldap connection. If the start_tls setting is enabled, ensure the ldaps setting is disabled.       |
 | `ldaps`               | boolean      | false      | Set to `true` to connect using the LDAPS protocol (LDAP over TLS). When ldaps is configured, you must use port 636. If the ldap setting is enabled, ensure the start_tls setting is disabled.       |
-| `ssl_verify`          | boolean      | false      | Set to true to authenticate LDAP server. The server certificate will be verified according to the CA certificates specified by the `lua_ssl_trusted_certificate` directive.       |
+| `ssl_verify`          | boolean      | true       | Verify the LDAP server's certificate against the CA certificates specified by the `lua_ssl_trusted_certificate` directive. Set to `false` to skip verification.       |
 | `keepalive_pool_name`           | string       | host:ip  | Set and override the default connection pool name for scenarios where the same connection parameters are used but with a different authentication method. The default value is the same as the OpenResty rule, and the value is the `host:port` of the LDAP server. |
 | `keepalive_pool_size`           | number       | 2          | Set the size of a certain connection pool. According to OpenResty's rule, it can only be set when the pool is created and cannot be changed dynamically. |
 
@@ -117,7 +117,7 @@ Compatibility entrypoint kept for APISIX's `ldap-auth` plugin, preserving the v0
 
 **syntax:** *ok, err, user_dn = ldap.ldap_authenticate(username, password, conf)*
 
-Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds, `false` when the server rejects the credentials, and `nil` on a connect/TLS/transport failure; in both failure cases `err` carries the error. The connection is always closed after the bind attempt — a socket that carried a Bind is never returned to the pool.
+Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds, `false` when the server rejects the credentials, and `nil` on an invalid `conf` or a connect/TLS/transport failure; in both failure cases `err` carries the error. The connection is always closed after the bind attempt — a socket that carried a Bind is never returned to the pool.
 
 `username` is escaped per RFC 4514 when the bind DN is built, so DN metacharacters (`, + " \ < > ; =`, a leading space or `#`, a trailing space, or a NUL) are treated as literal characters of the RDN value instead of injecting extra RDN components. Any username string is accepted, as in v0.1.0.
 
@@ -127,14 +127,13 @@ Binds against the directory as `<attribute>=<username>,<base_dn>` with the given
 
 | key      | type | default value      | Description |
 | ----------- | ----------- | ----------- | ----------- |
-| `ldap_host`           | string       | localhost  | LDAP server host. |
+| `ldap_host`           | string       | *required* | LDAP server host. |
 | `ldap_port`           | number       | 389        | LDAP server port. |
 | `timeout`             | number       | 10000      | Socket timeout in milliseconds. |
 | `keepalive`           | number       | 60000      | Accepted for v0.1.0 compatibility, but unused: sockets that carried a bind are always closed, never pooled. |
 | `start_tls`           | boolean      | false      | Issue the StartTLS extended operation before binding. |
 | `ldaps`               | boolean      | false      | Connect using LDAP over TLS. |
-| `tls_verify`          | boolean      | false      | Verify the server certificate during the TLS handshake. This is the key APISIX's `ldap-auth` passes. |
-| `verify_ldap_host`    | boolean      | false      | Legacy alias for `tls_verify` (pre-0.2). Honoured only when `tls_verify` is not set. |
-| `base_dn`             | string       | ou=users,dc=example,dc=org | Base DN the username is appended to. |
+| `tls_verify`          | boolean      | true       | Verify the server certificate during the TLS handshake. This is the key APISIX's `ldap-auth` passes. |
+| `base_dn`             | string       | *required* | Base DN the username is appended to. |
 | `attribute`           | string       | cn         | RDN attribute the username is bound as. |
 

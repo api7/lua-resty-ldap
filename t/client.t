@@ -92,7 +92,7 @@ simple bind failed, error: The supplied credential is invalid
         content_by_lua_block {
             local ldap_client = require("resty.ldap.client")
 
-            local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true })
+            local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true, ssl_verify = false })
             local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
             if not res then
                 ngx.log(ngx.ERR, err)
@@ -115,7 +115,7 @@ GET /t
         content_by_lua_block {
             local ldap_client = require("resty.ldap.client")
 
-            local client = ldap_client:new("127.0.0.1", 1389, { start_tls = true })
+            local client = ldap_client:new("127.0.0.1", 1389, { start_tls = true, ssl_verify = false })
             local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
             if not res then
                 ngx.log(ngx.ERR, err)
@@ -581,3 +581,26 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+
+=== TEST 18: an omitted ssl_verify verifies the server certificate
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+
+            -- no ssl_verify key, and no lua_ssl_trusted_certificate to satisfy it
+            local client = ldap_client:new("127.0.0.1", 1636, { ldaps = true })
+            local res, err = client:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1")
+            assert(res == nil, "an omitted ssl_verify must still verify, got " .. tostring(res))
+            assert(err:find("TLS handshake", 1, true), "unexpected err: " .. tostring(err))
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- error_log
+certificate verify error

@@ -8,10 +8,9 @@ local tostring = tostring
 local default_conf = {
     timeout = 10000,
     start_tls = false,
-    ldap_host = "localhost",
     ldap_port = 389,
     ldaps = false,
-    base_dn = "ou=users,dc=example,dc=org",
+    tls_verify = true,
     attribute = "cn",
     keepalive = 60000,
 }
@@ -22,17 +21,6 @@ local function set_conf_default_values(conf)
             conf[k] = v
         end
     end
-end
-
-
-local function resolve_tls_verify(conf)
-    if conf.tls_verify ~= nil then
-        return conf.tls_verify
-    end
-    if conf.verify_ldap_host ~= nil then
-        return conf.verify_ldap_host
-    end
-    return false
 end
 
 
@@ -63,6 +51,13 @@ local _M = {}
 function _M.ldap_authenticate(given_username, given_password, conf)
     set_conf_default_values(conf)
 
+    if conf.ldap_host == nil then
+        return nil, "ldap_host is required"
+    end
+    if conf.base_dn == nil then
+        return nil, "base_dn is required"
+    end
+
     -- same coercion contract as protocol.simple_bind_request
     if type(given_username) == "number" then
         given_username = tostring(given_username)
@@ -76,7 +71,7 @@ function _M.ldap_authenticate(given_username, given_password, conf)
         keepalive_timeout = conf.keepalive,
         start_tls         = conf.start_tls,
         ldaps             = conf.ldaps,
-        ssl_verify        = resolve_tls_verify(conf),
+        ssl_verify        = conf.tls_verify,
     })
 
     local ok, err = cli:connect()

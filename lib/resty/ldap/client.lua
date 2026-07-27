@@ -285,12 +285,17 @@ function _M.new(_, host, port, client_config)
     end
 
     local opts = client_config or {}
+    local ssl_verify = opts.ssl_verify
+    if ssl_verify == nil then
+        ssl_verify = true
+    end
+
     local socket_config = {
         socket_timeout = opts.socket_timeout or 10000,
         keepalive_timeout = opts.keepalive_timeout or (60 * 1000), -- 10 min
         start_tls = opts.start_tls or false,
         ldaps = opts.ldaps or false,
-        ssl_verify = opts.ssl_verify or false,
+        ssl_verify = ssl_verify,
 
         -- Specify the connection pool name directly to ensure that connections
         -- with the same connection parameters but using different authentication

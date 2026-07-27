@@ -73,21 +73,21 @@ ok
 
 
 
-=== TEST 3: verify_ldap_host=true is honoured as a legacy alias for tls_verify
+=== TEST 3: verification is on when tls_verify is unset
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
         content_by_lua_block {
             local ldap = require("resty.ldap")
+            -- no tls_verify key at all, and no lua_ssl_trusted_certificate
             local ok, err = ldap.ldap_authenticate("user01", "password1", {
-                ldap_host        = "localhost",
-                ldap_port        = 1636,
-                ldaps            = true,
-                verify_ldap_host = true,
-                base_dn          = "ou=users,dc=example,dc=org",
-                attribute        = "cn",
+                ldap_host = "127.0.0.1",
+                ldap_port = 1636,
+                ldaps     = true,
+                base_dn   = "ou=users,dc=example,dc=org",
+                attribute = "cn",
             })
-            assert(ok == nil, "legacy verify_ldap_host must enforce verification: " ..
+            assert(ok == nil, "an unset tls_verify must still verify: " ..
                               "expected a transport failure (nil), got " .. tostring(ok))
             assert(err:find("TLS handshake", 1, true), "unexpected err: " .. tostring(err))
             ngx.say("ok")
@@ -228,3 +228,55 @@ GET /t
 ok
 --- error_log
 certificate verify error
+
+
+
+=== TEST 8: a missing ldap_host is a config error, never a bind against localhost
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap = require("resty.ldap")
+            local ok, err = ldap.ldap_authenticate("user01", "password1", {
+                ldap_port = 1389,
+                base_dn   = "ou=users,dc=example,dc=org",
+                attribute = "cn",
+            })
+            assert(ok == nil, "a missing ldap_host must not authenticate, got " .. tostring(ok))
+            assert(err == "ldap_host is required", "unexpected err: " .. tostring(err))
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
+
+
+
+=== TEST 9: a missing base_dn is a config error, never a bind under a placeholder DN
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap = require("resty.ldap")
+            -- the directory really does hold ou=users,dc=example,dc=org, so a
+            -- placeholder default would authenticate under a DN never configured
+            local ok, err = ldap.ldap_authenticate("user01", "password1", {
+                ldap_host = "127.0.0.1",
+                ldap_port = 1389,
+                attribute = "cn",
+            })
+            assert(ok == nil, "a missing base_dn must not authenticate, got " .. tostring(ok))
+            assert(err == "base_dn is required", "unexpected err: " .. tostring(err))
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
