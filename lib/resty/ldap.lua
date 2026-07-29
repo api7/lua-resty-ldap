@@ -76,9 +76,13 @@ function _M.ldap_authenticate(given_username, given_password, conf)
 
     local who = conf.attribute .. "=" .. escape_dn_value(given_username) ..
                 "," .. conf.base_dn
-    -- not pinned: simple_bind validates before opening a socket, and releases it
-    -- into the bind pool for the next authenticate to reuse
     local is_authenticated, bind_err = cli:simple_bind(who, given_password)
+
+    -- release the connection into the bind pool for the next call to reuse
+    local released, release_err = cli:set_keepalive()
+    if not released then
+        log(ERR, "failed to return the connection to the pool: ", release_err)
+    end
 
     if is_authenticated == nil then
         -- connect, TLS or transport failure; the client already dropped the socket

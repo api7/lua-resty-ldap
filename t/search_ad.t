@@ -26,7 +26,6 @@ __DATA__
             local filter = require("resty.ldap.filter")
 
             local c = ldap_client:new("127.0.0.1", 1389)
-            assert(c:connect())
             assert(c:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
 
             local login = "jdoe"
@@ -57,7 +56,6 @@ ok
             local ldap_client = require("resty.ldap.client")
             local protocol = require("resty.ldap.protocol")
             local c = ldap_client:new("127.0.0.1", 1389)
-            assert(c:connect())
             assert(c:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
             local res = assert(c:search("ou=users,dc=example,dc=org",
                 protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, nil,

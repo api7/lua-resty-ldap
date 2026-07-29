@@ -24,7 +24,12 @@ __DATA__
             local ldap_client = require("resty.ldap.client")
 
             local client = ldap_client:new("127.0.0.1", 1389)
-            local res, err = client:search()
+
+            local bres, berr = client:search()
+            assert(bres == false, "nil base_dn must fail")
+            assert(berr == "base_dn cannot be nil", "got: " .. tostring(berr))
+
+            local res, err = client:search("dc=example,dc=org")
             if not res then
                 ngx.log(ngx.ERR, err)
                 ngx.exit(401)
@@ -589,9 +594,6 @@ GET /t
 
             local client = ldap_client:new("127.0.0.1", 1389)
 
-            -- pin the session so the modify runs on the bound connection
-            assert(client:connect())
-
             -- auth
             local res, err = client:simple_bind("cn=admin,dc=example,dc=org", "adminpassword")
             if not res then
@@ -667,9 +669,6 @@ GET /t
             local ldap_protocol = require("resty.ldap.protocol")
 
             local client = ldap_client:new("127.0.0.1", 1389)
-
-            -- pin the session so the modify runs on the bound connection
-            assert(client:connect())
 
             -- auth
             local res, err = client:simple_bind("cn=admin,dc=example,dc=org", "adminpassword")

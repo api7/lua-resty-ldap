@@ -186,23 +186,29 @@ ok
         lua_ssl_trusted_certificate ../../certs/mycacert.crt;
         content_by_lua_block {
             local ldap_client = require("resty.ldap.client")
+            local protocol = require("resty.ldap.protocol")
+
+            local function anon_search(c)
+                return c:search("dc=example,dc=org",
+                    protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
+            end
 
             -- pool a connection established without certificate verification
             local a = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = false })
-            assert(a:connect())
+            assert(anon_search(a))
             assert(a.socket:getreusedtimes() == 0, "first connection must be fresh")
             assert(a:set_keepalive())
 
             -- ssl_verify=true must not reuse it (a fresh connection is required)
             local b = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = true })
-            assert(b:connect())
+            assert(anon_search(b))
             assert(b.socket:getreusedtimes() == 0,
                    "an unverified pooled connection must not serve ssl_verify=true")
             assert(b:set_keepalive())
 
             -- control: the same policy does reuse its own pooled connection
             local c = ldap_client:new("localhost", 1636, { ldaps = true, ssl_verify = false })
-            assert(c:connect())
+            assert(anon_search(c))
             assert(c.socket:getreusedtimes() > 0, "same-policy reuse should hit the pool")
             assert(c:set_keepalive())
 
@@ -225,21 +231,27 @@ ok
         lua_ssl_trusted_certificate ../../certs/mycacert.crt;
         content_by_lua_block {
             local ldap_client = require("resty.ldap.client")
+            local protocol = require("resty.ldap.protocol")
+
+            local function anon_search(c)
+                return c:search("dc=example,dc=org",
+                    protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
+            end
 
             local a = ldap_client:new("localhost", 1389, { start_tls = true, ssl_verify = false })
-            assert(a:connect())
+            assert(anon_search(a))
             assert(a.socket:getreusedtimes() == 0, "first connection must be fresh")
             assert(a:set_keepalive())
 
             local b = ldap_client:new("localhost", 1389, { start_tls = true, ssl_verify = true })
-            assert(b:connect())
+            assert(anon_search(b))
             assert(b.socket:getreusedtimes() == 0,
                    "an unverified pooled STARTTLS connection must not serve ssl_verify=true")
             assert(b:set_keepalive())
 
             -- control: the same policy does reuse its own pooled connection
             local c = ldap_client:new("localhost", 1389, { start_tls = true, ssl_verify = false })
-            assert(c:connect())
+            assert(anon_search(c))
             assert(c.socket:getreusedtimes() > 0, "same-policy reuse should hit the pool")
             assert(c:set_keepalive())
 
@@ -277,7 +289,6 @@ ok
 
             local client = ldap_client:new("127.0.0.1", 1389)
             client.socket = sock
-            client.pinned = true
 
             local res, err = client:simple_bind(
                 "cn=user01,ou=users,dc=example,dc=org", "password1")
@@ -306,27 +317,28 @@ ok
             local ldap_client = require("resty.ldap.client")
             local protocol = require("resty.ldap.protocol")
 
-            -- prime the anonymous pool: an unbound single-shot search re-enters it
+            -- prime the anonymous pool: an unbound search re-enters it on release
             local a = ldap_client:new("127.0.0.1", 1389)
             assert(a:search("dc=example,dc=org",
                 protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)"))
+            assert(a:set_keepalive())
 
-            -- a single-shot admin bind draws from the bind pool, which is still
-            -- empty, so it opens its own connection and leaves that one alone
+            -- an admin bind draws from the bind pool, which is still empty, so it
+            -- opens its own connection and leaves the anonymous one alone
             local b = ldap_client:new("127.0.0.1", 1389)
             assert(b:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
+            assert(b:set_keepalive())
 
             -- exactly one checkout behind the anonymous socket. Had the bind
             -- borrowed it this would be 2 (pooled back) or 0 (closed), and
             -- either way the search below could inherit the admin identity.
             local c = ldap_client:new("127.0.0.1", 1389)
-            assert(c:connect())
-            assert(c.socket:getreusedtimes() == 1,
-                   "a bind must not draw from the anonymous pool, got " ..
-                   c.socket:getreusedtimes())
             local res, serr = c:search("dc=example,dc=org",
                 protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
             assert(res, "anonymous search: " .. tostring(serr))
+            assert(c.socket:getreusedtimes() == 1,
+                   "a bind must not draw from the anonymous pool, got " ..
+                   c.socket:getreusedtimes())
             assert(#res == 1, "one entry")
             assert(c:set_keepalive())
 
@@ -418,7 +430,6 @@ ok
 
             local client = ldap_client:new("127.0.0.1", 1389)
             client.socket = sock
-            client.pinned = true
 
             local res, err = client:simple_bind(
                 "cn=user01,ou=users,dc=example,dc=org", "password1")
@@ -461,7 +472,6 @@ ok
 
             local client = ldap_client:new("127.0.0.1", 1389)
             client.socket = sock
-            client.pinned = true
 
             local res, err = client:simple_bind(
                 "cn=user01,ou=users,dc=example,dc=org", "password1")
@@ -529,7 +539,6 @@ ok
 
             local client = ldap_client:new("127.0.0.1", 1389)
             client.socket = sock
-            client.pinned = true
 
             local res, err = client:simple_bind(
                 "cn=user01,ou=users,dc=example,dc=org", "password1")
@@ -576,7 +585,6 @@ ok
 
             local client = ldap_client:new("127.0.0.1", 1389)
             client.socket = sock
-            client.pinned = true
 
             local res, err = client:search("dc=example,dc=org")
             assert(res == false,

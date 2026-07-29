@@ -3,8 +3,6 @@ local protocol = require("resty.ldap.protocol")
 
 local tostring     = tostring
 local fmt          = string.format
-local log          = ngx.log
-local ERR          = ngx.ERR
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local decode_ldap  = protocol.decode_message
@@ -14,13 +12,18 @@ local decode_ldap  = protocol.decode_message
 -- worker. 16 MiB comfortably exceeds any real entry.
 local MAX_LDAP_MESSAGE_SIZE = 16 * 1024 * 1024
 
+-- fixed BER TLV prefix: identifier octet + initial length octet
+local BER_HEADER_LEN = 2
+
 
 local _M = {}
 local mt = { __index = _M }
 
--- returns body length + header bytes, or nil + error (length is validated)
-local function calculate_payload_length(encStr, pos, socket)
+-- takes the BER_HEADER_LEN-byte header (reading further length octets from the
+-- socket as needed); returns body length + header bytes, or nil + error
+local function calculate_payload_length(encStr, socket)
     local elen
+    local pos = BER_HEADER_LEN -- the initial length octet is the header's last byte
 
     pos, elen = bunpack(encStr, "C", pos)
 
@@ -66,12 +69,12 @@ local function _start_tls(sock)
     end
 
     -- receive STARTTLS response
-    local len, err = sock:receive(2)
+    local len, err = sock:receive(BER_HEADER_LEN)
     if not len then
         sock:close()
         return fmt("receive response header failed: %s", err)
     end
-    local packet_len, packet_header, lerr = calculate_payload_length(len, 2, sock)
+    local packet_len, packet_header, lerr = calculate_payload_length(len, sock)
     if not packet_len then
         sock:close()
         return lerr
@@ -129,9 +132,8 @@ local function _init_socket(self, will_bind)
         pool_suffix = pool_suffix .. (socket_config.ssl_verify and ":verify" or ":noverify")
     end
 
-    -- Sockets that carried a Bind pool separately, drawn only by a caller that
-    -- binds first: RFC 4513 s4 resets the session to anonymous on receipt of that
-    -- Bind, so no identity carries over. Everything else stays anonymous.
+    -- a connection opened by a Bind pools separately: every drawer binds first,
+    -- and that Bind resets the session (RFC 4513 s4), so no identity carries over
     if will_bind then
         pool_suffix = pool_suffix .. ":bind"
     end
@@ -183,43 +185,23 @@ local function _init_socket(self, will_bind)
     end
 
     self.socket = sock
+    self.from_bind_pool = will_bind
 end
 
--- drop the socket (and its pin) after an unrecoverable error
+-- drop the socket after an unrecoverable error
 local function _reset_socket(cli)
     local sock = cli.socket
     cli.socket = nil
-    cli.pinned = nil
-    cli.bound = nil
+    cli.from_bind_pool = nil
+    cli.unpoolable = nil
     if sock then
         sock:close()
     end
 end
 
--- return a single-shot socket to its pool; a pinned one is released by its owner
-local function _release_socket(cli)
-    if cli.pinned then
-        return
-    end
-
-    local sock = cli.socket
-    cli.socket = nil
-    if not sock then
-        return
-    end
-
-    local ok, err = sock:setkeepalive(cli.socket_config.keepalive_timeout)
-    if not ok then
-        -- ngx_lua already dropped the socket; log it because "connection in
-        -- dubious state" means a response went unread
-        log(ERR, "failed to return the connection to the pool: ", err)
-    end
-end
-
 local function _send_receive(cli, request, multi_resp_hint, will_bind)
-    -- In a pinned session the socket is already checked out; otherwise check out
-    -- one for this single operation.
-    if not cli.pinned then
+    -- opened on first use, held until the caller releases it
+    if not cli.socket then
         local err = _init_socket(cli, will_bind)
         if err then
             return nil, fmt("initialize socket failed: %s", err)
@@ -237,14 +219,11 @@ local function _send_receive(cli, request, multi_resp_hint, will_bind)
 
     local result = {}
     -- When the client sends a search request, the server will return several
-    -- different entries in a string-like concatenation, sto we must use a
+    -- different entries in a string-like concatenation, so we must use a
     -- loop to complete the bulk extraction of the data.
     -- This does not affect the response of a single "response body".
     while true do
-        -- Takes the packet header of a single request body, which has a length
-        -- of two bytes, where the second byte is the length of this response
-        -- body packet.
-        local len, err = socket:receive(2)
+        local len, err = socket:receive(BER_HEADER_LEN)
         if not len then
             -- a search ends at SearchResultDone and a single-response op at its
             -- one message; a timeout or close before either truncates the
@@ -253,7 +232,7 @@ local function _send_receive(cli, request, multi_resp_hint, will_bind)
             return nil, fmt("receive response failed: %s", err or "unknown")
         end
 
-        local packet_len, packet_header, lerr = calculate_payload_length(len, 2, socket)
+        local packet_len, packet_header, lerr = calculate_payload_length(len, socket)
         if not packet_len then
             _reset_socket(cli)
             return nil, lerr
@@ -294,8 +273,6 @@ local function _send_receive(cli, request, multi_resp_hint, will_bind)
         end
     end
 
-    -- the caller releases: setkeepalive is irreversible, so the response has to
-    -- be validated first
     return multi_resp_hint and result or result[1]
 end
 
@@ -335,31 +312,16 @@ function _M.new(_, host, port, client_config)
 end
 
 
-function _M.connect(self)
-    if self.pinned then
-        return true
-    end
-    local err = _init_socket(self)
-    if err then
-        return nil, err
-    end
-    self.pinned = true
-    return true
-end
-
-
 function _M.set_keepalive(self)
-    if not self.pinned then
-        return true
-    end
-    self.pinned = nil
     local sock = self.socket
+    local unpoolable = self.unpoolable
     self.socket = nil
+    self.from_bind_pool = nil
+    self.unpoolable = nil
     if not sock then
         return true
     end
-    if self.bound then
-        self.bound = nil
+    if unpoolable then
         return sock:close()
     end
     return sock:setkeepalive(self.socket_config.keepalive_timeout)
@@ -367,10 +329,10 @@ end
 
 
 function _M.close(self)
-    self.pinned = nil
-    self.bound = nil
     local sock = self.socket
     self.socket = nil
+    self.from_bind_pool = nil
+    self.unpoolable = nil
     if not sock then
         return true
     end
@@ -386,10 +348,10 @@ function _M.simple_bind(self, dn, password)
         return false, berr
     end
 
-    -- only pinned sockets need this: they came from the anonymous pool, so a Bind
-    -- leaves them unpoolable. A single-shot one came from the bind pool already.
-    if self.pinned then
-        self.bound = true
+    -- a bind on a connection drawn from the anonymous pool makes it unpoolable:
+    -- set_keepalive would hand its identity to the next anonymous drawer
+    if self.socket and not self.from_bind_pool then
+        self.unpoolable = true
     end
 
     local res, err = _send_receive(self, req, nil, true)
@@ -406,8 +368,6 @@ function _M.simple_bind(self, dn, password)
             res.protocol_op, protocol.APP_NO.BindResponse)
     end
 
-    _release_socket(self)
-
     if res.result_code ~= 0 then
         local error_msg = protocol.ERROR_MSG[res.result_code]
 
@@ -423,8 +383,12 @@ end
 
 function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
                    types_only, filter, attributes)
+    if not base_dn then
+        return false, "base_dn cannot be nil"
+    end
+
     local search_req, err = protocol.search_request(
-        base_dn       or 'dc=example,dc=org',
+        base_dn,
         scope         or protocol.SEARCH_SCOPE_WHOLE_SUBTREE,
         deref_aliases or protocol.SEARCH_DEREF_ALIASES_ALWAYS,
         size_limit    or 0, -- size limit
@@ -441,9 +405,6 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
     if not res then
         return false, err
     end
-
-    -- the exchange ended at SearchResultDone, so the socket is clean even on failure
-    _release_socket(self)
 
     for index, item in ipairs(res) do
         if item.protocol_op == protocol.APP_NO.SearchResultDone then
