@@ -183,11 +183,7 @@ end
 
 -- drop the socket after an unrecoverable error
 local function _reset_socket(cli)
-    local sock = cli.socket
-    cli.socket = nil
-    if sock then
-        sock:close()
-    end
+    cli:close()
 end
 
 local function _send_receive(cli, request, multi_resp_hint)
