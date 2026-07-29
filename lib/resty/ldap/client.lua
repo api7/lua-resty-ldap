@@ -1,6 +1,5 @@
 local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
-local to_hex   = require("resty.string").to_hex
 local ok, rasn = pcall(require, "rasn")
 
 if not ok then
@@ -13,6 +12,9 @@ local tcp          = ngx.socket.tcp
 local table_insert = table.insert
 local string_char  = string.char
 local rasn_decode  = rasn.decode_ldap
+local to_hex       = function(s)
+    return (s:gsub(".", function(c) return ("%02x"):format(c:byte()) end))
+end
 
 
 local _M = {}
