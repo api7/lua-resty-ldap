@@ -243,6 +243,12 @@ local function is_sequence(obj)
        and obj.cons
 end
 
+local function is_set(obj)
+    return obj.class == asn1.CLASS.UNIVERSAL
+       and obj.tag == asn1.TAG.SET
+       and obj.cons
+end
+
 -- protocolOp tags a server may send; anything else must not reach parse_ldap_result
 local LDAP_RESULT_OPS = {
     [_M.APP_NO.BindResponse]     = true,
@@ -308,12 +314,28 @@ local function parse_search_entry(packet, op, res)
                                                "AttributeDescription")
         if terr then return nil, terr end
         -- vals is a SET OF: enforce it so the stored value is always an array
-        local vend, vals, verr = decode_typed(packet, vpos, pastop,
-                                              asn1.TAG.SET, "attribute vals")
-        if verr then return nil, verr end
+        local vset, serr = asn1_get_object(packet, vpos, pastop)
+        if not vset then return nil, serr end
+        if not is_set(vset) then
+            return nil, "attribute vals is not a universal constructed SET"
+        end
         -- PartialAttribute has exactly two components; nothing may follow vals
-        if vend ~= pastop then
+        if vset.offset + vset.len ~= pastop then
             return nil, "trailing bytes in PartialAttribute"
+        end
+        -- AttributeValue ::= OCTET STRING (s4.1.5); asn1.decode would take any
+        -- universal type here and break the string-array contract
+        local vals = {}
+        local n = 0
+        local vp = vset.offset
+        local vstop = vset.offset + vset.len
+        while vp < vstop do
+            local val, verr
+            vp, val, verr = decode_typed(packet, vp, vstop,
+                                         asn1.TAG.OCTET_STRING, "AttributeValue")
+            if verr then return nil, verr end
+            n = n + 1
+            vals[n] = val
         end
         attributes[atype] = vals                 -- ALWAYS an array (empty for typesOnly)
         apos = pastop
@@ -365,6 +387,9 @@ function _M.decode_message(packet)
     local pos, message_id, merr = decode_typed(packet, env.offset, envstop,
                                                asn1.TAG.INTEGER, "messageID")
     if merr then return nil, merr end
+    if message_id < 0 or message_id > LDAP_MAX_INT then
+        return nil, "messageID out of range"
+    end
 
     local op, oerr = asn1_get_object(packet, pos, envstop)                  -- protocolOp
     if not op then return nil, oerr end

@@ -20,8 +20,8 @@ __DATA__
 --- config
     location /t {
         content_by_lua_block {
-            local decode   = require("ldap_decode")
             local protocol = require("resty.ldap.protocol")
+            local decode   = protocol.decode_message
             local ldap_hex = require("ldap_hex")
             local res = assert(decode(ldap_hex("30 0c 02 01 01 61 07 0a 01 00 04 00 04 00")))
             assert(res.protocol_op == protocol.APP_NO.BindResponse, "op " .. tostring(res.protocol_op))
@@ -43,8 +43,8 @@ ok
 --- config
     location /t {
         content_by_lua_block {
-            local decode   = require("ldap_decode")
             local protocol = require("resty.ldap.protocol")
+            local decode   = protocol.decode_message
             local ldap_hex = require("ldap_hex")
             local res = assert(decode(ldap_hex("30 0c 02 01 02 65 07 0a 01 20 04 00 04 00")))
             assert(res.protocol_op == protocol.APP_NO.SearchResultDone, "op")
@@ -64,8 +64,8 @@ ok
 --- config
     location /t {
         content_by_lua_block {
-            local decode   = require("ldap_decode")
             local protocol = require("resty.ldap.protocol")
+            local decode   = protocol.decode_message
             local ldap_hex = require("ldap_hex")
             -- entry_dn "x"; attribute s = { "\1\0\2" } (3 bytes, contains NUL)
             local res = assert(decode(ldap_hex("30 16 02 01 03 64 11 04 01 78 30 0c 30 0a 04 01 73 31 05 04 03 01 00 02")))
@@ -90,7 +90,7 @@ ok
 --- config
     location /t {
         content_by_lua_block {
-            local decode   = require("ldap_decode")
+            local decode   = require("resty.ldap.protocol").decode_message
             local ldap_hex = require("ldap_hex")
             local res = assert(decode(ldap_hex(
                 "30 11 02 01 03 64 0c 04 01 78 30 07 30 05 04 01 73 31 00")))

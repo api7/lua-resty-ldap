@@ -31,9 +31,6 @@ jobs:
           # Test::Nginx
           sudo cpanm --notest Test::Nginx
 
-          # rust
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
           # luarocks
           sudo apt -y install lua5.1 luarocks
           luarocks make rockspec/lua-resty-ldap-local-0.rockspec --local --tree ./deps # install deps to local
@@ -56,5 +53,7 @@ jobs:
             docker logs openldap || true
             exit 1
           fi
+          docker cp t/fixtures/ad.ldif openldap:/tmp/ad.ldif
+          docker exec openldap ldapadd -x -H ldap://127.0.0.1:1389 -D "cn=admin,dc=example,dc=org" -w adminpassword -f /tmp/ad.ldif
           export PATH=$OPENRESTY_PREFIX/nginx/sbin:$OPENRESTY_PREFIX/luajit/bin:$PATH
           make test
