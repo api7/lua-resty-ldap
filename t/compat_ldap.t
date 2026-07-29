@@ -205,7 +205,7 @@ ok
             })
             assert(ok, "unverified handshake should bind: " .. tostring(err))
 
-            -- the first call pools its socket under :noverify:bind, so the
+            -- the first call pools its socket under :noverify, so the
             -- verifying call cannot draw it and needs a fresh handshake, which
             -- fails: no trusted certificate is configured
             local ok2, err2 = ldap.ldap_authenticate("user01", "password1", {

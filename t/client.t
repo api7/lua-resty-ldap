@@ -309,7 +309,7 @@ ok
 
 
 
-=== TEST 11: a single-shot bind pools apart from the anonymous pool
+=== TEST 11: bind and unbound sessions share one pool
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -317,36 +317,28 @@ ok
             local ldap_client = require("resty.ldap.client")
             local protocol = require("resty.ldap.protocol")
 
-            -- prime the anonymous pool: an unbound search re-enters it on release
+            -- an unbound search opens a connection and pools it on release
             local a = ldap_client:new("127.0.0.1", 1389)
             assert(a:search("dc=example,dc=org",
                 protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)"))
             assert(a:set_keepalive())
 
-            -- an admin bind draws from the bind pool, which is still empty, so it
-            -- opens its own connection and leaves the anonymous one alone
+            -- a bind draws that same pooled connection: the pool is keyed by
+            -- host, port and TLS policy only, not by bind state
             local b = ldap_client:new("127.0.0.1", 1389)
             assert(b:simple_bind("cn=admin,dc=example,dc=org", "adminpassword"))
+            assert(b.socket:getreusedtimes() == 1,
+                   "the bind should draw the pooled connection, got " ..
+                   b.socket:getreusedtimes())
             assert(b:set_keepalive())
 
-            -- exactly one checkout behind the anonymous socket. Had the bind
-            -- borrowed it this would be 2 (pooled back) or 0 (closed), and
-            -- either way the search below could inherit the admin identity.
+            -- and the bound connection re-enters the same pool for the next session
             local c = ldap_client:new("127.0.0.1", 1389)
-            local res, serr = c:search("dc=example,dc=org",
-                protocol.SEARCH_SCOPE_BASE_OBJECT, nil, nil, nil, nil, "(objectClass=*)")
-            assert(res, "anonymous search: " .. tostring(serr))
-            assert(c.socket:getreusedtimes() == 1,
-                   "a bind must not draw from the anonymous pool, got " ..
+            assert(c:simple_bind("cn=user01,ou=users,dc=example,dc=org", "password1"))
+            assert(c.socket:getreusedtimes() == 2,
+                   "the bound connection should have been pooled again, got " ..
                    c.socket:getreusedtimes())
-            assert(#res == 1, "one entry")
             assert(c:set_keepalive())
-
-            -- the bind pool did keep its socket, so the next bind reuses it
-            local probe = ngx.socket.tcp()
-            assert(probe:connect("127.0.0.1", 1389, { pool = "127.0.0.1:1389:bind" }))
-            assert(probe:getreusedtimes() > 0, "the bound socket was not pooled")
-            probe:close()
 
             ngx.say("ok")
         }
@@ -360,7 +352,7 @@ ok
 
 
 
-=== TEST 12: ldap_authenticate reuses the bind pool and never the anonymous one
+=== TEST 12: ldap_authenticate reuses one pooled connection across calls
 --- http_config eval: $::HttpConfig
 --- config
     location /t {
@@ -381,25 +373,26 @@ ok
             assert(ok2, "authenticate failed: " .. tostring(err2))
 
             local probe = ngx.socket.tcp()
-            assert(probe:connect("127.0.0.1", 1389, { pool = "127.0.0.1:1389:bind" }))
+            assert(probe:connect("127.0.0.1", 1389))
             assert(probe:getreusedtimes() == 2,
                    "the second authenticate should have reused the pooled socket, got " ..
                    probe:getreusedtimes())
             probe:close()
 
             -- a rejected bind leaves the session anonymous (RFC 4513 s4), so its
-            -- socket is poolable too, and the next call still rebinds on it
+            -- socket is pooled like any other, and the next call rebinds on it
             local ok3 = ldap.ldap_authenticate("user01", "wrong-password", conf)
             assert(ok3 == false, "a wrong password must be rejected (false), got " .. tostring(ok3))
             local ok4, err4 = ldap.ldap_authenticate("user01", "password1", conf)
             assert(ok4, "a reused socket must still authenticate: " .. tostring(err4))
 
-            -- and none of those sockets ever entered the anonymous pool, where an
-            -- unbound search would have picked up a user's identity
+            -- the rejected bind's socket was pooled and rebound: one socket,
+            -- two checkouts since the probe closed the previous one
             local probe2 = ngx.socket.tcp()
             assert(probe2:connect("127.0.0.1", 1389))
-            assert(probe2:getreusedtimes() == 0,
-                   "a bound socket leaked into the anonymous pool")
+            assert(probe2:getreusedtimes() == 2,
+                   "the rejected bind's socket should have been pooled, got " ..
+                   probe2:getreusedtimes())
             probe2:close()
 
             ngx.say("ok")
@@ -625,3 +618,38 @@ GET /t
 ok
 --- error_log
 certificate verify error
+
+
+=== TEST 19: ldap_authenticate rejects an empty or missing password before any bind
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap = require("resty.ldap")
+            local conf = {
+                ldap_host = "127.0.0.1",
+                ldap_port = 1389,
+                base_dn   = "ou=users,dc=example,dc=org",
+                attribute = "cn",
+            }
+
+            -- RFC 4513 s5.1.2: an empty password with a non-empty DN is an
+            -- unauthenticated bind, which some servers accept as an anonymous
+            -- success; the client must refuse to send it
+            local ok, err = ldap.ldap_authenticate("user01", "", conf)
+            assert(ok == false, "an empty password must be rejected (false), got " .. tostring(ok))
+            assert(err:find("missing or empty", 1, true), "unexpected err: " .. tostring(err))
+
+            local ok2, err2 = ldap.ldap_authenticate("user01", nil, conf)
+            assert(ok2 == false, "a nil password must be rejected (false), got " .. tostring(ok2))
+            assert(err2:find("missing or empty", 1, true), "unexpected err: " .. tostring(err2))
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]

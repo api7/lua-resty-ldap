@@ -111,7 +111,7 @@ local function _start_tls(sock)
     end
 end
 
-local function _init_socket(self, will_bind)
+local function _init_socket(self)
     local host = self.host
     local port = self.port
     local socket_config = self.socket_config
@@ -130,12 +130,6 @@ local function _init_socket(self, will_bind)
     end
     if pool_suffix ~= "" then
         pool_suffix = pool_suffix .. (socket_config.ssl_verify and ":verify" or ":noverify")
-    end
-
-    -- a connection opened by a Bind pools separately: every drawer binds first,
-    -- and that Bind resets the session (RFC 4513 s4), so no identity carries over
-    if will_bind then
-        pool_suffix = pool_suffix .. ":bind"
     end
 
     local opts = {
@@ -185,24 +179,21 @@ local function _init_socket(self, will_bind)
     end
 
     self.socket = sock
-    self.from_bind_pool = will_bind
 end
 
 -- drop the socket after an unrecoverable error
 local function _reset_socket(cli)
     local sock = cli.socket
     cli.socket = nil
-    cli.from_bind_pool = nil
-    cli.unpoolable = nil
     if sock then
         sock:close()
     end
 end
 
-local function _send_receive(cli, request, multi_resp_hint, will_bind)
+local function _send_receive(cli, request, multi_resp_hint)
     -- opened on first use, held until the caller releases it
     if not cli.socket then
-        local err = _init_socket(cli, will_bind)
+        local err = _init_socket(cli)
         if err then
             return nil, fmt("initialize socket failed: %s", err)
         end
@@ -314,15 +305,9 @@ end
 
 function _M.set_keepalive(self)
     local sock = self.socket
-    local unpoolable = self.unpoolable
     self.socket = nil
-    self.from_bind_pool = nil
-    self.unpoolable = nil
     if not sock then
         return true
-    end
-    if unpoolable then
-        return sock:close()
     end
     return sock:setkeepalive(self.socket_config.keepalive_timeout)
 end
@@ -331,8 +316,6 @@ end
 function _M.close(self)
     local sock = self.socket
     self.socket = nil
-    self.from_bind_pool = nil
-    self.unpoolable = nil
     if not sock then
         return true
     end
@@ -348,13 +331,7 @@ function _M.simple_bind(self, dn, password)
         return false, berr
     end
 
-    -- a bind on a connection drawn from the anonymous pool makes it unpoolable:
-    -- set_keepalive would hand its identity to the next anonymous drawer
-    if self.socket and not self.from_bind_pool then
-        self.unpoolable = true
-    end
-
-    local res, err = _send_receive(self, req, nil, true)
+    local res, err = _send_receive(self, req)
     if not res then
         -- transport/decode failure: nil, so callers can tell an unreachable
         -- or broken server (nil) from rejected credentials (false)

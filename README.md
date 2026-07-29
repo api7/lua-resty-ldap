@@ -93,13 +93,13 @@ The client opens its connection on the first operation and holds it, so a `simpl
 
 An unrecoverable socket error drops the connection, so the next operation opens a new one instead of reusing the dead one.
 
-Connection pools are partitioned by transport mode (plain, STARTTLS, LDAPS) and TLS verification policy. A connection opened by a `simple_bind` is additionally drawn from — and returned to — a pool reserved for callers that bind, so releasing it never hands its identity to an unauthenticated caller; whoever draws it next binds first, which resets the LDAP session (RFC 4513 section 4). A client that runs unauthenticated operations and then a `simple_bind` keeps everything on its one connection, which now carries that identity; the client tracks this, and `set_keepalive` closes such a connection instead of returning it to the anonymous pool.
+Connection pools are partitioned by transport mode (plain, STARTTLS, LDAPS) and TLS verification policy; bind state is not part of the pool key. A released connection keeps whatever bind state its session left, so a drawn connection's identity is unknown until the session establishes its own: issue a `simple_bind` first whenever identity matters — each bind resets the LDAP session (RFC 4513 section 4). A connection that hits a transport or protocol error is closed, never pooled.
 
 #### set_keepalive
 
 **syntax:** *ok, err = client:set_keepalive()*
 
-Returns the connection to the connection pool and detaches it from the client, closing it instead when pooling would leak a bound identity (see [Connection lifecycle](#connection-lifecycle)). The client remains usable; the next operation opens or draws another connection. Returns `true` when there is no connection to release.
+Returns the connection to the connection pool and detaches it from the client. The client remains usable; the next operation opens or draws another connection. Returns `true` when there is no connection to release.
 
 #### close
 
@@ -119,7 +119,7 @@ Compatibility entrypoint kept for APISIX's `ldap-auth` plugin, preserving the v0
 
 **syntax:** *ok, err, user_dn = ldap.ldap_authenticate(username, password, conf)*
 
-Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds, `false` when the server rejects the credentials, and `nil` on an invalid `conf` or a connect/TLS/transport failure; in both failure cases `err` carries the error. The connection is released after the bind attempt, into the pool reserved for connections that carry a Bind, so the next call reuses it.
+Binds against the directory as `<attribute>=<username>,<base_dn>` with the given password. `ok` is `true` when authentication succeeds, `false` when the credentials are rejected — an empty or missing password is refused before any request is sent, as it would form an unauthenticated bind (RFC 4513 section 5.1.2) — and `nil` on an invalid `conf` or a connect/TLS/transport failure; in both failure cases `err` carries the error. The connection is released into the pool after the bind attempt — whatever its outcome — and the next call reuses it and rebinds.
 
 `username` is escaped per RFC 4514 when the bind DN is built, so DN metacharacters (`, + " \ < > ; =`, a leading space or `#`, a trailing space, or a NUL) are treated as literal characters of the RDN value instead of injecting extra RDN components. Any username string is accepted, as in v0.1.0.
 
