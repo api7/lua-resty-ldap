@@ -199,21 +199,26 @@ local ESCAPE_MAP = {
     ["="]  = "\\3d",
     ["<"]  = "\\3c",
     [">"]  = "\\3e",
+    ["~"]  = "\\7e",
 }
 
 -- RFC 4515 s3: escape the octets that are special in an assertion value so that
 -- untrusted input cannot change the filter's structure. The compiler un-escapes
 -- \HH back to raw bytes, so escape() is its exact inverse for these octets.
--- The five RFC-mandated specials are `* ( ) \ NUL`; `= < >` are not RFC-special
+-- The five RFC-mandated specials are `* ( ) \ NUL`; `= < > ~` are not RFC-special
 -- but the grammar above is stricter and rejects them raw inside a value, so we
--- escape them too (escaping any octet is RFC-legal and round-trips). Note: valid
--- multi-byte UTF-8 passes through the grammar unescaped; a lone invalid-UTF-8
--- byte (0x80-0xFF) is not escaped here and fails the filter closed.
+-- escape them too (escaping any octet is RFC-legal and round-trips). `~` is the
+-- subtler one: UTF8_FILTERED_CHARACTER excludes it so that `~=` can be read as
+-- the approx operator, and the Cmt that hands a raw `~` back to the value only
+-- fires away from the end of the filter string -- so a leading or trailing `~`
+-- would otherwise fail a value RFC 4515 permits (UTF1SUBSET is %x5D-7F).
+-- Note: valid multi-byte UTF-8 passes through the grammar unescaped; a lone
+-- invalid-UTF-8 byte (0x80-0xFF) is not escaped here and fails the filter closed.
 function _M.escape(value)
     if type(value) ~= "string" then
         return nil, "value must be a string"
     end
-    return (value:gsub("[%z%*%(%)\\=<>]", ESCAPE_MAP))
+    return (value:gsub("[%z%*%(%)\\=<>~]", ESCAPE_MAP))
 end
 
 
