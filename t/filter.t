@@ -519,3 +519,35 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+=== TEST 8: escape covers ~, which RFC 4515 allows but the grammar rejects at the edges
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local filter = require("resty.ldap.filter")
+            assert(filter.escape("a~b") == "a\\7eb", "tilde")
+            -- RFC 4515 UTF1SUBSET (%x5D-7F) includes ~ (0x7e), so these are all
+            -- legal assertion values. The grammar only tolerates a raw ~ mid-value
+            -- and only away from the end of the filter string, so escaping is what
+            -- makes the leading and trailing forms usable.
+            for _, raw in ipairs({ "admin~", "~admin", "ad~min", "admin~~", "~" }) do
+                local ast = assert(filter.compile("(cn=" .. filter.escape(raw) .. ")"),
+                                   "value must compile after escaping: " .. raw)
+                assert(ast.item_type == "simple" and ast.filter_type == "equal",
+                       "simple equality: " .. raw)
+                assert(ast.attribute_value == raw,
+                       "round-trips to raw: " .. tostring(ast.attribute_value))
+            end
+            -- ~= stays an operator: escaping only ever applies to the value
+            local approx = assert(filter.compile("(cn~=admin)"), "approx filter still parses")
+            assert(approx.filter_type == "approx", "filter_type != approx, " .. approx.filter_type)
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
