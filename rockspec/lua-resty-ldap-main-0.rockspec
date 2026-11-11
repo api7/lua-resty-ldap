@@ -25,5 +25,6 @@ build = {
       ["resty.ldap.filter"]   = "lib/resty/ldap/filter.lua",
       ["resty.ldap.protocol"] = "lib/resty/ldap/protocol.lua",
       ["resty.ldap.client"]   = "lib/resty/ldap/client.lua",
+      ["resty.ldap.gssapi"]   = "lib/resty/ldap/gssapi.lua",
    }
 }

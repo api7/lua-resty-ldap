@@ -31,6 +31,15 @@ jobs:
           # Test::Nginx
           sudo cpanm --notest Test::Nginx
 
+          # Kerberos realm + slapd for the SASL/GSSAPI tests (t/gssapi.t)
+          echo "slapd slapd/no_configuration boolean true" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
+            krb5-kdc krb5-admin-server krb5-user slapd ldap-utils libsasl2-modules-gssapi-mit
+          # the packaged AppArmor profile confines slapd to its system paths
+          if [ -f /etc/apparmor.d/usr.sbin.slapd ]; then
+            sudo apparmor_parser -R /etc/apparmor.d/usr.sbin.slapd || true
+          fi
+
           # luarocks
           sudo apt -y install lua5.1 luarocks
           luarocks make rockspec/lua-resty-ldap-local-0.rockspec --local --tree ./deps # install deps to local
@@ -55,5 +64,9 @@ jobs:
           fi
           docker cp t/fixtures/ad.ldif openldap:/tmp/ad.ldif
           docker exec openldap ldapadd -x -H ldap://127.0.0.1:1389 -D "cn=admin,dc=example,dc=org" -w adminpassword -f /tmp/ad.ldif
+          # a separate assignment, so a failed start fails the step instead of
+          # leaving t/gssapi.t to skip
+          gssapi_env=$(t/gssapi/env.sh start)
+          eval "$gssapi_env"
           export PATH=$OPENRESTY_PREFIX/nginx/sbin:$OPENRESTY_PREFIX/luajit/bin:$PATH
           make test

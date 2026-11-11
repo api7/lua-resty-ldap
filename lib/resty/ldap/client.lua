@@ -1,10 +1,14 @@
 local bunpack  = require("lua_pack").unpack
 local protocol = require("resty.ldap.protocol")
+local gssapi   = require("resty.ldap.gssapi")
 
 local tostring     = tostring
 local fmt          = string.format
 local tcp          = ngx.socket.tcp
 local table_insert = table.insert
+local str_byte     = string.byte
+local str_sub      = string.sub
+local band         = require("bit").band
 local decode_ldap  = protocol.decode_message
 
 -- Upper bound on a single LDAP message body (bytes). A well-formed length such
@@ -351,6 +355,160 @@ function _M.simple_bind(self, dn, password)
     end
 
     return true
+end
+
+
+-- a context needs one round trip with Kerberos (two with a mutual-auth reply);
+-- anything far beyond that is a misbehaving server
+local MAX_GSSAPI_ROUNDS = 10
+
+local function _bind_error(what, res)
+    local error_msg = protocol.ERROR_MSG[res.result_code]
+    return fmt("%s, error: %s, details: %s", what,
+               error_msg or ("Unknown error occurred (code: " .. res.result_code .. ")"),
+               res.diagnostic_msg or "")
+end
+
+-- one SASL BindRequest/BindResponse round trip; nil, err on transport
+-- failure, false, err on a non-BindResponse, else the response
+local function _sasl_step(self, credentials)
+    local req, berr = protocol.sasl_bind_request("GSSAPI", credentials)
+    if not req then
+        _reset_socket(self)
+        return false, berr
+    end
+
+    local res, err = _send_receive(self, req)
+    if not res then
+        return nil, err
+    end
+
+    if res.protocol_op ~= protocol.APP_NO.BindResponse then
+        -- the BindResponse may still be queued behind this one: not reusable
+        _reset_socket(self)
+        return false, fmt("Received incorrect Op in packet: %d, expected %d",
+            res.protocol_op, protocol.APP_NO.BindResponse)
+    end
+
+    return res
+end
+
+-- RFC 4752 s3.1, the client side of the SASL GSSAPI exchange
+local function _gssapi_exchange(self, ctx)
+    -- abandoning a bind midway leaves the server waiting for the next step,
+    -- so every client-side abort after the first request drops the connection
+    local function abort(err)
+        _reset_socket(self)
+        return false, err
+    end
+
+    -- context establishment: trade tokens until gss_init_sec_context completes
+    local server_token
+    local complete
+    local rounds = 0
+    while true do
+        rounds = rounds + 1
+        if rounds > MAX_GSSAPI_ROUNDS then
+            return abort("GSSAPI bind did not converge")
+        end
+
+        local token, done_or_err = ctx:step(server_token)
+        if not token then
+            if rounds == 1 then
+                -- nothing was sent: the session is untouched
+                return false, done_or_err
+            end
+            return abort(done_or_err)
+        end
+        complete = done_or_err
+
+        -- once complete with no token left, send an empty response
+        local res, err = _sasl_step(self, token)
+        if not res then
+            return res, err
+        end
+
+        local code = res.result_code
+        if code == protocol.RESULT_SASL_BIND_IN_PROGRESS then
+            server_token = res.server_sasl_creds or ""
+            if complete then
+                break -- server_token is the security layer offer
+            end
+        elseif code == 0 then
+            -- RFC 4752 s3.1 requires the security layer negotiation even when
+            -- no layer is chosen; a success that skips it (and possibly the
+            -- rest of the context establishment) is not a valid GSSAPI bind
+            return abort("GSSAPI bind succeeded before the security " ..
+                         "layer negotiation")
+        else
+            -- the server ended the bind: the session is anonymous and reusable
+            return false, _bind_error("GSSAPI bind failed", res)
+        end
+    end
+
+    -- security layer negotiation: the offer is a wrapped 4-octet message,
+    -- a bitmask of supported layers then the server's max message size
+    if server_token == "" then
+        return abort("GSSAPI: server did not send a security layer offer")
+    end
+
+    local offer, uerr = ctx:unwrap(server_token)
+    if not offer then
+        return abort(uerr)
+    end
+    if #offer ~= 4 then
+        -- RFC 4752 s3.1: any other length fails the negotiation
+        return abort("GSSAPI: server security layer offer must be exactly 4 bytes")
+    end
+
+    -- bit 0 is "no security layer"; the per-message layers are not
+    -- implemented, so integrity and privacy must come from TLS instead
+    if band(str_byte(offer, 1), 1) == 0 then
+        return abort("GSSAPI: server requires a security layer " ..
+                     "(no-security-layer bit not set)")
+    end
+
+    -- RFC 4752 s3.1: a server offering no layer at all (neither integrity,
+    -- bit 1, nor privacy, bit 2) must advertise a maximum buffer of 0
+    if band(str_byte(offer, 1), 6) == 0 and str_sub(offer, 2) ~= "\0\0\0" then
+        return abort("GSSAPI: server offers no security layer but a " ..
+                     "nonzero maximum buffer size")
+    end
+
+    -- choose no security layer, max message size 0, no authzid
+    local wrapped, werr = ctx:wrap("\1\0\0\0")
+    if not wrapped then
+        return abort(werr)
+    end
+
+    local res, err = _sasl_step(self, wrapped)
+    if not res then
+        return res, err
+    end
+    if res.result_code == protocol.RESULT_SASL_BIND_IN_PROGRESS then
+        -- the layer choice is the client's last message, so the server
+        -- asking for another is a protocol violation, and leaves the bind
+        -- open on the server
+        return abort(_bind_error("GSSAPI bind did not end after the " ..
+                                 "security layer choice", res))
+    end
+    if res.result_code ~= 0 then
+        return false, _bind_error("GSSAPI security layer negotiation failed", res)
+    end
+
+    return true
+end
+
+
+function _M.gssapi_bind(self, service_name)
+    local ctx, err = gssapi.new(service_name)
+    if not ctx then
+        return false, fmt("GSSAPI context init failed: %s", err)
+    end
+
+    local ok, berr = _gssapi_exchange(self, ctx)
+    ctx:free()
+    return ok, berr
 end
 
 
