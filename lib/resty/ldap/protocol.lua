@@ -184,25 +184,27 @@ function _M.search_request(base_obj, scope, deref_aliases, size_limit, time_limi
     end
 
     -- surface asn1.encode's (nil, err) here; the results are concatenated below
-    local base_obj, err = asn1_encode(base_obj, asn1.TAG.OCTET_STRING)
+    local err
+    base_obj, err = asn1_encode(base_obj, asn1.TAG.OCTET_STRING)
     if not base_obj then return nil, err end
-    local scope, err = asn1_encode(scope, asn1.TAG.ENUMERATED)
+    scope, err = asn1_encode(scope, asn1.TAG.ENUMERATED)
     if not scope then return nil, err end
-    local deref_aliases, err = asn1_encode(deref_aliases, asn1.TAG.ENUMERATED)
+    deref_aliases, err = asn1_encode(deref_aliases, asn1.TAG.ENUMERATED)
     if not deref_aliases then return nil, err end
-    local size_limit, err = asn1_encode(size_limit, asn1.TAG.INTEGER)
+    size_limit, err = asn1_encode(size_limit, asn1.TAG.INTEGER)
     if not size_limit then return nil, err end
-    local time_limit, err = asn1_encode(time_limit, asn1.TAG.INTEGER)
+    time_limit, err = asn1_encode(time_limit, asn1.TAG.INTEGER)
     if not time_limit then return nil, err end
-    local types_only, err = asn1_encode(types_only, asn1.TAG.BOOLEAN)
+    types_only, err = asn1_encode(types_only, asn1.TAG.BOOLEAN)
     if not types_only then return nil, err end
 
     -- compile filter
-    local filter_tbl, err = filter_compiler.compile(filter)
+    local filter_tbl
+    filter_tbl, err = filter_compiler.compile(filter)
     if not filter_tbl then
         return nil, err
     end
-    local filter = build_asn1_filters(filter_tbl)
+    filter = build_asn1_filters(filter_tbl)
 
     -- encode attributes to sequence
     local attributes_encoded = ""

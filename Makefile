@@ -11,6 +11,11 @@ test:
 	trap 'exit 130' INT TERM HUP; \
 	prove -r t/
 
+### lint:         Run luacheck on the library
+.PHONY: lint
+lint:
+	luacheck lib/
+
 ### help:         Show Makefile rules
 .PHONY: help
 help:

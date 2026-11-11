@@ -8,6 +8,21 @@ on:
 
 
 jobs:
+  lint:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: install luacheck
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install --no-install-recommends lua5.1 liblua5.1-0-dev luarocks build-essential
+          luarocks install --local luacheck
+          echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
+
+      - name: luacheck
+        run: make lint
+
   build:
     runs-on: "ubuntu-latest"
     env:
