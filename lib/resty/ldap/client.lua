@@ -69,7 +69,8 @@ local function _start_tls(sock)
     end
 
     -- receive STARTTLS response
-    local len, err = sock:receive(BER_HEADER_LEN)
+    local len
+    len, err = sock:receive(BER_HEADER_LEN)
     if not len then
         sock:close()
         return fmt("receive response header failed: %s", err)
@@ -80,14 +81,16 @@ local function _start_tls(sock)
         return lerr
     end
 
-    local packet, err = sock:receive(packet_len)
+    local packet
+    packet, err = sock:receive(packet_len)
     if not packet then
         sock:close()
         return fmt("receive response failed: %s", err)
     end
 
-    local packet = packet_header .. packet
-    local res, err = decode_ldap(packet)
+    packet = packet_header .. packet
+    local res
+    res, err = decode_ldap(packet)
     if not res then
         sock:close()
         -- the body can carry DNs and attribute values; keep it out of the error
@@ -150,7 +153,8 @@ local function _init_socket(self)
 
     if socket_config.start_tls then
         -- convert connection to a STARTTLS connection only if it is a new connection
-        local count, err = sock:getreusedtimes()
+        local count
+        count, err = sock:getreusedtimes()
         if not count then
             -- connection was closed, just return instead
             sock:close()
@@ -160,7 +164,7 @@ local function _init_socket(self)
 
         if count == 0 then
             -- STARTTLS (_start_tls closes the socket on every failure)
-            local err = _start_tls(sock)
+            err = _start_tls(sock)
             if err then
                 return fmt("launch STARTTLS connection on %s:%s failed: %s",
                             host, tostring(port), err)
@@ -210,7 +214,8 @@ local function _send_receive(cli, request, multi_resp_hint)
     -- loop to complete the bulk extraction of the data.
     -- This does not affect the response of a single "response body".
     while true do
-        local len, err = socket:receive(BER_HEADER_LEN)
+        local len
+        len, err = socket:receive(BER_HEADER_LEN)
         if not len then
             -- a search ends at SearchResultDone and a single-response op at its
             -- one message; a timeout or close before either truncates the
@@ -226,7 +231,8 @@ local function _send_receive(cli, request, multi_resp_hint)
         end
 
         -- Get the data of the specified length
-        local packet, err = socket:receive(packet_len)
+        local packet
+        packet, err = socket:receive(packet_len)
         if not packet then
             -- When the packet header is read but the packet body cannot be read,
             -- this error is considered unacceptable and therefore an error is
@@ -235,8 +241,9 @@ local function _send_receive(cli, request, multi_resp_hint)
             return nil, fmt("receive response failed: %s", err)
         end
 
-        local packet = packet_header .. packet
-        local res, err = decode_ldap(packet)
+        packet = packet_header .. packet
+        local res
+        res, err = decode_ldap(packet)
         if not res then
             -- the body can carry DNs and attribute values; keep it out of the error
             _reset_socket(cli)
@@ -374,7 +381,8 @@ function _M.search(self, base_dn, scope, deref_aliases, size_limit, time_limit,
         return false, err
     end
 
-    local res, err = _send_receive(self, search_req, true) -- mark as potential multi-response operation
+    local res
+    res, err = _send_receive(self, search_req, true) -- mark as potential multi-response operation
     if not res then
         return false, err
     end

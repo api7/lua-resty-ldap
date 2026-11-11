@@ -1,6 +1,6 @@
 local lpeg = require("lpeg")
-local P, R, S, V = lpeg.P, lpeg.R, lpeg.S, lpeg.V
-local C, Ct, Cmt, Cg, Cp, Cc, Cf = lpeg.C, lpeg.Ct, lpeg.Cmt, lpeg.Cg, lpeg.Cp, lpeg.Cc, lpeg.Cf
+local P, R, V = lpeg.P, lpeg.R, lpeg.V
+local Ct, Cmt = lpeg.Ct, lpeg.Cmt
 
 local string_char  = string.char
 local string_sub   = string.sub
@@ -21,10 +21,6 @@ _M.FILTER_TYPE_APPROX  = 'approx'
 _M.FILTER_TYPE_GREATER = 'greater'
 _M.FILTER_TYPE_LESS    = 'less'
 
-
-local function pack(...)
-    return { n = select('#', ...), ... }
-end
 
 -- Utility
 local function maybe(pattern)
@@ -85,7 +81,8 @@ local filter = P{
             return cOPBody(_M.OP_TYPE_NOT, ...)
         end,
     ITEM = V'ITEM_PRESENT_AND_SUBSTRING' +  V'ITEM_SIMPLE',
-    ITEM_PRESENT_AND_SUBSTRING = (V'ATTRIBUTE_DESCRIPTION' * V'FILTER_TYPE_EQUAL' * V'ATTRIBUTE_VALUE_SUBSTRING') / function(...)
+    ITEM_PRESENT_AND_SUBSTRING =
+        (V'ATTRIBUTE_DESCRIPTION' * V'FILTER_TYPE_EQUAL' * V'ATTRIBUTE_VALUE_SUBSTRING') / function(...)
         return cItemBody(nil, ...)
     end,
     ITEM_SIMPLE = V'ATTRIBUTE_DESCRIPTION' * V'FILTER_TYPE' * V'ATTRIBUTE_VALUE' / function(...)
@@ -161,13 +158,13 @@ local filter = P{
         Cmt(R('\0\127'), function(s, i, prev) -- match all ASCII character
             -- Make sure that this character is not the last character, only then it is
             -- possible to compose the operator.
-            if #s <= i + 1 then 
+            if #s <= i + 1 then
                 return false
             end
 
             -- Ensures that the value is parsed properly if there is a separate ~ symbol in the value.
             if string_sub(s, i, i) == '~' and string_sub(s, i + 1, i + 1) ~= "=" then
-                -- Captures and skips that ~ symbol. The previous capture element needs to be 
+                -- Captures and skips that ~ symbol. The previous capture element needs to be
                 -- added back manually.
                 return i + 1, prev .. '~'
             end
