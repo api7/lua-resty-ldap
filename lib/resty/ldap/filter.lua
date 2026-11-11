@@ -168,8 +168,13 @@ local filter = P{
 }
 
 
+-- RFC 4515 s3: a filter string is exactly one filter; -1 rejects trailing
+-- input, which match() would otherwise ignore, silently dropping e.g. the
+-- second half of "(cn=a)(uid=*)"
+local filter_string = filter * -1
+
 function _M.compile(str)
-    local result = filter:match(str)
+    local result = filter_string:match(str)
     if result then
         return result
     end

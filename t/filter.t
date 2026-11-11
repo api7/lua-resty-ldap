@@ -639,3 +639,46 @@ GET /t
 --- no_error_log
 [error]
 --- error_code: 200
+
+
+
+=== TEST 10: a filter string is exactly one filter
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local filter = require("resty.ldap.filter")
+
+            -- RFC 4515 s3: filter = "(" filtercomp ")"; several filters are
+            -- only allowed as the operands of & or |
+            for _, f in ipairs({
+                "(cn=a)(uid=*)",
+                "(cn=a) junk",
+                "(cn=a)b)",
+                "(cn=a))",
+                "(&(cn=a)(cn=b))x",
+                "(cn=a)\0",
+            }) do
+                local res, err = filter.compile(f)
+                assert(res == nil and err == "syntax error",
+                       string.format("%q must be rejected", f))
+            end
+
+            -- surrounding whitespace is still accepted
+            for _, f in ipairs({ " (cn=a) ", "\t(cn=a)\r\n", "(cn=a)\n" }) do
+                local res = assert(filter.compile(f), string.format("%q must compile", f))
+                assert(res.attribute_value == "a", string.format("%q value", f))
+            end
+
+            -- the operator forms are the way to combine filters
+            local res = assert(filter.compile("(&(cn=a)(uid=*))"))
+            assert(res.op_type == "and" and #res.items == 2, "and of two items")
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
