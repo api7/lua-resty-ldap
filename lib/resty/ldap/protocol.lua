@@ -17,10 +17,14 @@ _M.ERROR_MSG = {
     [1]  = "Initialization of LDAP library failed",
     [4]  = "Size limit exceeded",
     [13] = "Confidentiality required",
+    [14] = "SASL bind in progress",
     [32] = "No such object",
     [34] = "Invalid DN",
     [49] = "The supplied credential is invalid"
 }
+
+-- RFC 4511 s4.2.2: resultCode saslBindInProgress
+_M.RESULT_SASL_BIND_IN_PROGRESS = 14
 
 _M.APP_NO = {
     BindRequest = 0,
@@ -74,6 +78,31 @@ function _M.simple_bind_request(dn, password)
 
     local ldapAuth = asn1_put_object(0, asn1.CLASS.CONTEXT_SPECIFIC, 0, password)
     local bindReq = asn1_encode(3) .. asn1_encode(dn) .. ldapAuth
+    local ldapMsg = ldap_message(_M.APP_NO.BindRequest, bindReq)
+    return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
+end
+
+
+function _M.sasl_bind_request(mechanism, credentials)
+    -- RFC 4511 s4.2: AuthenticationChoice sasl [3] SaslCredentials, with
+    -- SaslCredentials ::= SEQUENCE { mechanism LDAPString,
+    --                                credentials OCTET STRING OPTIONAL }
+    -- nil credentials omit the field; "" sends an empty one (RFC 4422 s5
+    -- distinguishes an empty response from an absent one)
+    if type(mechanism) ~= "string" or mechanism == "" then
+        return nil, "SASL mechanism must be a non-empty string"
+    end
+    if credentials ~= nil and type(credentials) ~= "string" then
+        return nil, "SASL credentials must be a string"
+    end
+
+    local sasl_body = asn1_encode(mechanism, asn1.TAG.OCTET_STRING)
+    if credentials then
+        sasl_body = sasl_body .. asn1_encode(credentials, asn1.TAG.OCTET_STRING)
+    end
+    local sasl_auth = asn1_put_object(3, asn1.CLASS.CONTEXT_SPECIFIC, 1, sasl_body)
+    -- the name is empty: SASL carries the identity in the credentials
+    local bindReq = asn1_encode(3) .. asn1_encode("") .. sasl_auth
     local ldapMsg = ldap_message(_M.APP_NO.BindRequest, bindReq)
     return asn1_encode(ldapMsg, asn1.TAG.SEQUENCE)
 end
@@ -261,19 +290,44 @@ local function parse_ldap_result(packet, op, res)
     -- RFC 4511 s4.1.9: LDAPResult ::= SEQUENCE { resultCode ENUMERATED,
     -- matchedDN LDAPDN, diagnosticMessage LDAPString, referral [3] OPTIONAL }
     local stop = op.offset + op.len
-    local _, pos, code, matched_dn, diag, err
+    local pos, code, matched_dn, diag, err
     pos, code, err = decode_typed(packet, op.offset, stop,
                                   asn1.TAG.ENUMERATED, "resultCode")
     if err then return nil, err end
     pos, matched_dn, err = decode_typed(packet, pos, stop,
                                         asn1.TAG.OCTET_STRING, "matchedDN")
     if err then return nil, err end
-    _, diag, err = decode_typed(packet, pos, stop,
-                                asn1.TAG.OCTET_STRING, "diagnosticMessage")
+    pos, diag, err = decode_typed(packet, pos, stop,
+                                  asn1.TAG.OCTET_STRING, "diagnosticMessage")
     if err then return nil, err end
     res.result_code = code
     res.matched_dn = matched_dn
     res.diagnostic_msg = diag
+
+    -- RFC 4511 s4.2.2: BindResponse ::= [APPLICATION 1] SEQUENCE {
+    --   COMPONENTS OF LDAPResult, serverSaslCreds [7] OCTET STRING OPTIONAL }
+    -- SASL mechanisms such as GSSAPI carry their server tokens in it
+    if op.tag == _M.APP_NO.BindResponse and pos < stop then
+        local obj, oerr = asn1_get_object(packet, pos, stop)
+        if not obj then return nil, oerr end
+        -- step over the optional referral [3] that precedes it
+        if obj.class == asn1.CLASS.CONTEXT_SPECIFIC and obj.tag == 3 then
+            pos = obj.offset + obj.len
+            obj = nil
+            if pos < stop then
+                obj, oerr = asn1_get_object(packet, pos, stop)
+                if not obj then return nil, oerr end
+            end
+        end
+        if obj and obj.class == asn1.CLASS.CONTEXT_SPECIFIC and obj.tag == 7 then
+            -- IMPLICIT OCTET STRING: always primitive in DER/LDAP BER (s5.1)
+            if obj.cons then
+                return nil, "serverSaslCreds is not a primitive OCTET STRING"
+            end
+            res.server_sasl_creds = packet:sub(obj.offset + 1, obj.offset + obj.len)
+        end
+    end
+
     -- no whole-op check: optional trailing fields (referral [3], SASL creds,
     -- responseName/Value) legally follow and AD emits them constantly
     return res

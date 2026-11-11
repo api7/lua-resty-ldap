@@ -65,6 +65,24 @@ To load this module:
 
 `res` is `true` when authentication succeeds and `false` when the server rejects the bind (or the request cannot be encoded); on a transport or decoding failure `res` is `nil`. In both failure cases `err` carries the error.
 
+#### gssapi_bind
+
+**syntax:** *res, err = client:gssapi_bind(service_name)*
+
+Authenticates with SASL/GSSAPI, i.e. Kerberos V5 (RFC 4752), as the principal whose credentials the worker process holds.
+
+`service_name` is the server's host-based GSS-API service name, `ldap@<host>`, for the service principal `ldap/<host>@REALM`. This library passes the host on as given, but the Kerberos library may canonicalize it through DNS before choosing the service principal (with MIT Kerberos, depending on `dns_canonicalize_hostname` and `rdns` in `krb5.conf`), so an alias or a short name can select a different principal than the one written. Use the server's fully qualified name, or disable canonicalization there.
+
+`res` follows `simple_bind`: `true` on success, `false` when the bind is refused (by the server, or locally when no credentials or service ticket can be obtained), and `nil` on a transport or decoding failure, with `err` carrying the error in both failure cases. A refused bind that the server completed leaves the session anonymous and usable; when the exchange is abandoned midway the connection is closed instead. A bind refused locally before anything was sent (e.g. no credentials) leaves the session as it was, including the identity of any earlier bind, so check for `res == true` before relying on the bound identity.
+
+No SASL security layer is negotiated, so the connection carries no Kerberos integrity or confidentiality protection: use `start_tls` or `ldaps` to protect it. A server that insists on a security layer (for example via `minssf`, or Active Directory's LDAP signing requirement on plain connections) refuses the bind.
+
+Requirements and caveats:
+
+- The GSS-API library is loaded through the LuaJIT FFI on first use: MIT Kerberos (`libgssapi_krb5`) or Heimdal (`libgssapi.so.3`). Set `require("resty.ldap.gssapi").library_names` before the first bind to load another one.
+- Credentials are taken from the default credential cache of the nginx worker. Point it at one with `KRB5CCNAME` (or have the library obtain them from a client keytab with `KRB5_CLIENT_KTNAME`), and pass the variable through with nginx's `env` directive.
+- `gss_init_sec_context` is a blocking call. While a service ticket is cached it runs locally, but when one must be fetched it contacts the KDC synchronously and blocks the worker meanwhile; neither `socket_timeout` nor anything else in this library bounds that wait. Keep it rare and short: renew the worker's credentials outside nginx (e.g. with `k5start` or a periodic `kinit -k`) so the cache holds a valid ticket-granting ticket, and bound the wait for an unreachable KDC in `krb5.conf` (`request_timeout` in MIT Kerberos 1.22 and later, `kdc_timeout` in Heimdal).
+
 #### search
 
 **syntax:** *res, err = client:search(base_dn, scope?, deref_aliases?, size_limit?, time_limit?, types_only?, filter?, attributes?)*
@@ -93,7 +111,7 @@ The client opens its connection on the first operation and holds it, so a `simpl
 
 An unrecoverable socket error drops the connection, so the next operation opens a new one instead of reusing the dead one.
 
-Connection pools are partitioned by transport mode (plain, STARTTLS, LDAPS) and TLS verification policy; bind state is not part of the pool key. A released connection keeps whatever bind state its session left, so a drawn connection's identity is unknown until the session establishes its own: issue a `simple_bind` first whenever identity matters — each bind resets the LDAP session (RFC 4513 section 4). A connection that hits a transport or protocol error is closed, never pooled.
+Connection pools are partitioned by transport mode (plain, STARTTLS, LDAPS) and TLS verification policy; bind state is not part of the pool key. A released connection keeps whatever bind state its session left, so a drawn connection's identity is unknown until the session establishes its own: issue a `simple_bind` or `gssapi_bind` first whenever identity matters — each bind resets the LDAP session (RFC 4513 section 4). A connection that hits a transport or protocol error is closed, never pooled.
 
 #### set_keepalive
 
