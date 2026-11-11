@@ -700,3 +700,50 @@ GET /t
 --- no_error_log
 [error]
 --- error_code: 200
+
+
+
+=== TEST 20: search filter (assertion values containing =, <, >, ~)
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local ldap_client = require("resty.ldap.client")
+            local protocol = require("resty.ldap.protocol")
+
+            local client = ldap_client:new("127.0.0.1", 1389)
+            local function search(filter)
+                local res, err = client:search("dc=example,dc=org",
+                    protocol.SEARCH_SCOPE_WHOLE_SUBTREE, nil, nil, nil, nil,
+                    filter, { "cn" })
+                assert(res, filter .. ": " .. tostring(err))
+                return res
+            end
+
+            -- a DN-valued equality match, the case RFC 4515 values were broken for
+            local res = search("(member=cn=user01,ou=users,dc=example,dc=org)")
+            assert(#res == 1 and res[1].entry_dn == "cn=readers,ou=groups,dc=example,dc=org",
+                   "member=<dn> must find the group, got " .. #res .. " entries")
+
+            -- inside a compound filter
+            res = search("(&(objectClass=groupOfNames)(member=cn=user02,ou=users,dc=example,dc=org))")
+            assert(#res == 1, "compound member filter, got " .. #res)
+
+            -- a value that matches nothing still reaches the server as a value
+            res = search("(member=cn=nobody,ou=users,dc=example,dc=org)")
+            assert(#res == 0, "unknown member, got " .. #res)
+            for _, f in ipairs({ "(cn=a<b)", "(cn=a>b)", "(cn=a~b)", "(cn=~)" }) do
+                res = search(f)
+                assert(#res == 0, f .. " matches nothing, got " .. #res)
+            end
+
+            assert(client:close())
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- no_error_log
+[error]
